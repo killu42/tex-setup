@@ -1,0 +1,47 @@
+TeX-Setup
+=========
+Installationsskripte fuer macOS, Windows und Debian/Ubuntu/Linux Mint.
+Die zwei Aufrufzeilen laden das ganze Skript per HTTPS und starten es erst
+nach erfolgreichem Download. Die Programme kommen aus offiziellen Quellen.
+
+mac.sh: Auf unterstuetzten Apple-Silicon-Macs Homebrew einrichten/aktualisieren,
+dann MacTeX installieren/aktualisieren. Bei Intel/aelterem macOS oder einer
+vorhandenen, nicht von Homebrew verwalteten MacTeX-Installation wird der
+signierte offizielle MacTeX-Installer verwendet. Danach TeX-Live-Pakete
+aktualisieren und TeXShop oeffnen. Alte TeX-Live-Jahresordner werden bei
+direkter Installation nicht geloescht. Homebrew kann fuer seine Einrichtung
+Apple Command Line Tools benoetigen. Andere Homebrew-Programme werden nicht
+pauschal aktualisiert. Das Skript setzt keine Terminal-Profile um.
+
+win.ps1: WinGet per Microsoft.WinGet.Client einrichten/aktualisieren,
+MiKTeX fuer den aktuellen Benutzer installieren oder vorhandenes MiKTeX mit
+seinem eigenen Paketmanager aktualisieren, TeXworks oeffnen. Kein Aendern
+der Ausfuehrungsrichtlinie. Systemweite MiKTeX-Updates brauchen eine erhoehte
+PowerShell. Offizielle Dialoge und Passwortabfragen bleiben wirksam.
+
+linux.sh: Die genannten TeX-Live-Pakete und TeXstudio aus den eingerichteten
+APT-Paketquellen installieren/aktualisieren. Deren Version kann hinter einer
+neuen upstream-Version liegen. Kein Upgrade des ganzen Betriebssystems.
+
+Erkannte fremde TeX-Installationen werden nicht automatisch ersetzt.
+Internet, ausreichend Speicher, ein unterstuetztes System und die noetigen
+Installationsrechte sind erforderlich. Es gibt keine Garantie fuer alle
+Rechner und keine dauerhafte Wartungsfreiheit bei Aenderungen der Anbieter.
+Es werden keine persoenlichen Dokumente hochgeladen oder geloescht und keine
+Zugangsdaten abgefragt; das Betriebssystem kann ein Passwort verlangen.
+
+Quellen
+https://brew.sh/
+https://docs.brew.sh/Manpage
+https://www.tug.org/mactex/mactex-download.html
+https://learn.microsoft.com/en-us/windows/package-manager/winget/
+https://docs.miktex.org/manual/miktex-packages.html
+https://wiki.debian.org/TeXLive
+
+Verwaltung
+Dateien unter https://github.com/killu42/tex-setup bearbeiten. Die Aufrufe
+verwenden main und erhalten damit die neueste dort hinterlegte Fassung.
+Um kuenftige Aufrufe zu stoppen, Skripte durch einen kurzen Abbruch ersetzen
+oder das Repository privat schalten. Archivieren allein sperrt Downloads
+nicht. Bereits heruntergeladene Kopien lassen sich nicht zurueckrufen;
+CDN-Caches koennen Aenderungen verzoegert uebernehmen.
