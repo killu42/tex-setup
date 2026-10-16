@@ -1,43 +1,98 @@
-TeX-Setup: nur Paketmanager
-==========================
-mac.sh richtet ausschliesslich Homebrew ein oder aktualisiert es und macht
-brew in der aktuellen Shell verfuegbar. Das Skript muss dort mit eval
-ausgefuehrt werden, nicht in einer getrennten Bash. Es verwendet nur den
-offiziellen Homebrew-Installer. Dessen aktuelle Systemanforderungen gelten.
+TeX-Setup: lokale Protokollierung und gezielte Deinstallation
+==========================================================
+track.sh (macOS/Linux) und track.ps1 (Windows) definieren beim Laden nur
+Funktionen. tex_prepare bzw. Initialize-TeX richtet Homebrew/WinGet ein oder
+aktualisiert es ueber die bisherigen mac.sh / win.ps1. Diese beiden Dateien
+bleiben reine Paketmanager-Bootstraps. linux.sh ist ein deaktivierter Alt-Einstieg.
 
-win.ps1 richtet ausschliesslich WinGet ein oder aktualisiert es und macht
-winget in der aktuellen PowerShell verfuegbar. Die PDF ruft in der naechsten
-Zeile direkt winget install fuer MiKTeX auf.
-Die PowerShell-Ausfuehrungsrichtlinie wird nicht veraendert.
+Die eigentlichen TeX-Installationsbefehle bleiben separat sichtbar:
+  tex_install brew install --cask mactex
+  Install-TeX { winget install --id MiKTeX.MiKTeX -e --scope user -s winget }
+Linux verwendet tex_install vor dem sichtbaren APT-Befehl fuer die sechs
+angegebenen Pakete. Die Wrapper akzeptieren nur diese konkreten Befehle.
+Andere Distributionen werden nicht entfernt. Die PowerShell-Richtlinie bleibt
+unveraendert. Der MiKTeX-Befehl ist kein allgemeiner MiKTeX-Paketupdater.
 
-Die TeX-Installationsbefehle stehen ausdruecklich separat in der Anleitung:
-Mac: brew install --cask mactex
-Windows: winget install --id MiKTeX.MiKTeX -e --scope user -s winget
-Linux: direkte APT-Befehle; kein Repository-Aufruf erforderlich.
-linux.sh ist ein deaktivierter alter Einstieg, der nur einen Hinweis ausgibt.
+Lokale Ablage und Datenschutz
+----------------------------
+Mac:     ~/Library/Application Support/TeX-Setup/
+Windows: %LOCALAPPDATA%\TeX-Setup\state.json (Ordner mit Hidden-Attribut)
+Linux:   ${XDG_STATE_HOME:-~/.local/state}/tex-setup/
+Die Protokolle liegen nur auf dem jeweiligen Rechner. Sie werden niemals
+hochgeladen und geben keinen Schreibzugriff auf GitHub. Sie enthalten
+Paketnamen, Versionen, Installationsstatus und lokale Pruefmerkmale.
+Verborgene Dateien koennen vom Benutzer trotzdem geloescht werden.
+Die normalen Downloadserver sehen Verbindungsdaten wie die IP-Adresse.
+Zum Abruf der oeffentlichen Skripte wird kein GitHub-Konto benoetigt.
 
-Es gibt keine TeX-Installation und keine TeX-Paketupdates in diesen Skripten.
-Insbesondere aktualisiert WinGet nicht die Pakete einer bestehenden
-MiKTeX-Installation. Dafuer hat MiKTeX seine eigene Updatefunktion.
-Bestehende fremde Distributionen werden durch diese Bootstrap-Skripte
-weder erkannt noch ersetzt. Die separat kopierten Installationsbefehle
-starten jeweils den angegebenen Installer.
+Entfernung: tex_remove bzw. Remove-TeX nach Laden des passenden Skripts.
+Dabei werden keine fehlenden Paketmanager nachinstalliert oder aktualisiert.
+Bekannte Protokolldateien werden erst nach erfolgreicher Entfernung geloescht;
+bei Fehlern oder unklarem Nachweis bleiben sie fuer die weitere Klaerung erhalten.
 
-Internet, ausreichend Speicher, ein unterstuetztes System und die noetigen
-Installationsrechte sind erforderlich. Offizielle Abfragen bleiben wirksam.
-Keine Garantie fuer alle Rechner oder dauerhafte Wartungsfreiheit.
-Persoenliche Dokumente werden nicht hochgeladen oder geloescht.
+Schutzregeln und Grenzen
+-----------------------
+- Vorhandene Programme bleiben samt Updates erhalten. Wiederholte Aufrufe
+  setzen den urspruenglichen Nachweis nicht zurueck. Altinstallationen ohne
+  Protokoll werden nicht nachtraeglich als eigene Neuinstallation beansprucht.
+- Vor dem Installationsbefehl wird ein Pending-Marker geschrieben. Erst nach
+  Erfolg und Nachpruefung gilt die Installation als abgeschlossen. Bei einem
+  Abbruch wird weder automatisch entfernt noch nachtraeglich Besitz angenommen.
+- Eine lokale Sperre verhindert parallele Setup-/Entfernungsvorgaenge. Nach
+  hartem Prozessabbruch kann eine Sperre vorsichtshalber bestehen bleiben.
+- Mac: Nur neues Homebrew-MacTeX ohne vorherige TeX-Ordner wird entfernt.
+  Cask-Version und Dateibaum-Metadaten muessen uebereinstimmen. Bestehende
+  TeX-Ordner oder spaetere Aenderungen fuehren zum Erhalt. Kein --zap.
+- Windows: Nur eindeutig neues benutzerspezifisches MiKTeX wird entfernt.
+  Registry-Identitaet, Version, Installationsort und Dateibaum-Metadaten
+  muessen uebereinstimmen. Keine globale Registry-/AppData-Bereinigung.
+- Linux: Nur vorher fehlende Pakete aus dem simulierten Installationsplan
+  werden nach Erfolg als neu vermerkt, einschliesslich neuer Abhaengigkeiten.
+  Eine Entfernungssimulation darf keine fremden Pakete betreffen. dpkg entfernt
+  ausschliesslich die explizite Liste und verweigert verletzte Abhaengigkeiten.
+  Veraenderte Paketdateien stoppen die Entfernung. Kein autoremove/purge/force.
+- Homebrew, WinGet/App-Installer, NuGet, PowerShell-Einrichtungsmodule, Apple-
+  Entwicklerwerkzeuge und Ghostscript werden NICHT automatisch entfernt, auch
+  wenn sie vorher fehlten. Sie sind gemeinsam nutzbare Infrastruktur. Es ist
+  keine vollstaendige Ruecksetzung des Rechners auf einen Snapshot.
+- Eigene Dokumente und Vorlagen werden nicht zur Loeschung ausgewaehlt.
+  Aenderungen innerhalb eines Programmordners verhindern dessen Entfernung.
+  Ein nativer Hersteller-Uninstaller entfernt seine eigenen Programmdateien.
+- Das Protokoll verhindert Verwechslungen, nicht absichtliche Manipulation
+  durch denselben Benutzer/Administrator. Metadaten sind kein kryptografischer
+  Integritaetsbeweis jedes einzelnen Dateiinhalts.
+
+Voraussetzungen und Tests
+------------------------
+Unterstuetztes Betriebssystem, Internet, Speicher und Installationsrechte.
+Linux: Debian/Ubuntu/Mint mit APT und curl oder wget. Die aktuellen
+Systemanforderungen von MacTeX/Homebrew bzw. WinGet gelten weiterhin.
+Keine Garantie fuer jeden Rechner oder dauerhafte Wartungsfreiheit.
+
+node test-setup.mjs        : bestehende Bootstrap-Pruefungen
+node test-tracking.mjs     : Bash/zsh mit isolierten Paketmanager-/sudo-Mocks
+pwsh -NoProfile -File test-tracking.ps1 : PowerShell-Zustandsmaschine mit Mocks
+Keine echten Installationen oder Deinstallationen durch diese Tests.
+Native End-to-End-Tests auf Windows und Linux stehen weiterhin aus.
 
 Quellen
-https://brew.sh/
+-------
 https://docs.brew.sh/Manpage
+https://github.com/Homebrew/homebrew-cask/blob/HEAD/Casks/m/mactex.rb
+https://www.tug.org/mactex/uninstalling.html
 https://learn.microsoft.com/en-us/windows/package-manager/winget/
-https://learn.microsoft.com/en-us/windows/package-manager/winget/install
+https://learn.microsoft.com/en-us/windows/package-manager/winget/uninstall
+https://miktex.org/faq
+https://manpages.debian.org/bookworm/apt/apt-get.8.en.html
+https://manpages.debian.org/bookworm/dpkg/dpkg.1.en.html
 
 Verwaltung
+----------
 Dateien unter https://github.com/killu42/tex-setup bearbeiten.
-Die Aufrufe verwenden main und laden die dort hinterlegte neueste Fassung.
-Zum Stoppen kuenftiger Aufrufe die Skripte durch einen Abbruch ersetzen oder
-das Repository privat schalten. Archivieren allein sperrt Downloads nicht.
-Bereits heruntergeladene Kopien lassen sich nicht zurueckrufen; CDN-Caches
-koennen Aenderungen verzoegert uebernehmen.
+Die Aufrufe verwenden main und laden die dort hinterlegte aktuelle Fassung.
+Nur der Inhaber und ausdruecklich berechtigte Mitwirkende/Apps koennen schreiben.
+Zum Stoppen kuenftiger Aufrufe Skripte durch einen Abbruch ersetzen oder das
+Repository privat schalten. Archivieren allein sperrt Downloads nicht.
+Bereits heruntergeladene Kopien werden nicht zurueckgerufen; CDN-Caches koennen
+Aenderungen verzoegert uebernehmen. Benutzername/Repository sind oeffentlich;
+keine Anonymitaetsgarantie.
