@@ -73,6 +73,13 @@ tex_packages() {
 }
 tex_install() (
   set -eu
+  # Keep preparation out of the copy/paste block. Validate before any effects.
+  case "$(uname -s):$*" in
+    'Darwin:brew install --cask mactex') ;;
+    'Linux:sudo apt-get install -y texlive-latex-extra texlive-lang-german texlive-fonts-recommended biber latexmk texstudio') ;;
+    *) tex_error 'Nur der Installationsbefehl aus der Anleitung ist erlaubt.'; exit 1 ;;
+  esac
+  tex_prepare || exit 1
   tex_lock_held=0
   trap '[ "$tex_lock_held" != 1 ] || rmdir "$tex_state/lock" 2>/dev/null || :' EXIT
   trap 'exit 130' INT

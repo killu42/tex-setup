@@ -1,15 +1,19 @@
 TeX-Setup: lokale Protokollierung und gezielte Deinstallation
 ==========================================================
 track.sh (macOS/Linux) und track.ps1 (Windows) definieren beim Laden nur
-Funktionen. tex_prepare bzw. Initialize-TeX richtet Homebrew/WinGet ein oder
+Funktionen. tex_install bzw. Install-TeX ruft die Vorbereitung jetzt selbst
+auf: tex_prepare bzw. Initialize-TeX richtet Homebrew/WinGet ein oder
 aktualisiert es ueber die bisherigen mac.sh / win.ps1. Diese beiden Dateien
 bleiben reine Paketmanager-Bootstraps. linux.sh ist ein deaktivierter Alt-Einstieg.
 
 Die eigentlichen TeX-Installationsbefehle bleiben separat sichtbar:
   tex_install brew install --cask mactex
   Install-TeX { winget install --id MiKTeX.MiKTeX -e --scope user -s winget }
-Linux verwendet tex_install vor dem sichtbaren APT-Befehl fuer die sechs
-angegebenen Pakete. Die Wrapper akzeptieren nur diese konkreten Befehle.
+linux-install.sh laedt den Tracker und uebergibt den festen APT-Befehl fuer
+die sechs Pakete; die Paketliste steht damit nicht mehr im PDF-Aufruf.
+Die Wrapper akzeptieren nur diese konkreten Befehle. Vorbereitungsfehler
+stoppen die Installation. Die PowerShell-Fehlerbehandlung gilt nur innerhalb
+der Funktion und veraendert keine dauerhaften Benutzereinstellungen.
 Andere Distributionen werden nicht entfernt. Die PowerShell-Richtlinie bleibt
 unveraendert. Der MiKTeX-Befehl ist kein allgemeiner MiKTeX-Paketupdater.
 
@@ -26,6 +30,7 @@ Die normalen Downloadserver sehen Verbindungsdaten wie die IP-Adresse.
 Zum Abruf der oeffentlichen Skripte wird kein GitHub-Konto benoetigt.
 
 Entfernung: tex_remove bzw. Remove-TeX nach Laden des passenden Skripts.
+remove.ps1 uebernimmt Laden und Entfernen fuer den einzeiligen Windows-Aufruf.
 Dabei werden keine fehlenden Paketmanager nachinstalliert oder aktualisiert.
 Bekannte Protokolldateien werden erst nach erfolgreicher Entfernung geloescht;
 bei Fehlern oder unklarem Nachweis bleiben sie fuer die weitere Klaerung erhalten.
@@ -72,6 +77,8 @@ Keine Garantie fuer jeden Rechner oder dauerhafte Wartungsfreiheit.
 node test-setup.mjs        : bestehende Bootstrap-Pruefungen
 node test-tracking.mjs     : Bash/zsh mit isolierten Paketmanager-/sudo-Mocks
 pwsh -NoProfile -File test-tracking.ps1 : PowerShell-Zustandsmaschine mit Mocks
+node test-entrypoints.mjs  : Linux-Einstieg und PDF-Befehle mit Download-Mocks
+pwsh -NoProfile -File test-entrypoints.ps1 : kurzer Windows-Einstieg mit Mocks
 Keine echten Installationen oder Deinstallationen durch diese Tests.
 Native End-to-End-Tests auf Windows und Linux stehen weiterhin aus.
 

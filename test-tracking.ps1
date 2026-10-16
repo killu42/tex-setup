@@ -16,6 +16,7 @@ function New-Fixture {
     $script:installRoot = Join-Path $root ('program-' + [guid]::NewGuid())
     $script:apps = @(); $script:fingerprint = 'unchanged'; $script:removals=0
     $script:failInstall=$false; $script:failRemove=$false
+    $script:failBootstrap=$false; $script:bootstrapCalls=0
 }
 function Get-TeXRecordPath { $script:dir }
 function Get-TeXUser { 'S-1-TEST' }
@@ -23,7 +24,11 @@ function Get-TeXRegistrations { $script:apps }
 function Get-TeXInventory { $script:fingerprint }
 function Get-TeXInstallRoot { $script:installRoot }
 function Get-AppxPackage { @() }
-function Invoke-RestMethod { '# bootstrap mocked: no network' }
+function Invoke-RestMethod {
+    $script:bootstrapCalls++
+    if ($script:failBootstrap) { Write-Error 'mock download failure'; return }
+    '# bootstrap mocked: no network'
+}
 function winget {
     $script:apps = @([pscustomobject]@{Key='HKEY_CURRENT_USER\Software\MiKTeX';Name='MiKTeX';Version='1';Location='mock-root'})
     $global:LASTEXITCODE = if ($script:failInstall) {9} else {0}
@@ -33,7 +38,7 @@ function Invoke-TeXUninstall {
     if ($script:failRemove) { throw 'mock uninstall error' }
     $script:apps=@()
 }
-function Setup { Initialize-TeX; Install-TeX { winget install --id MiKTeX.MiKTeX -e --scope user -s winget } }
+function Setup { Install-TeX { winget install --id MiKTeX.MiKTeX -e --scope user -s winget } }
 function Case([string]$Name,[scriptblock]$Test) {
     New-Fixture
     & $Test
@@ -107,5 +112,20 @@ Case 'real inventory detects newly added files' {
     $first = & $nativeInventory
     Set-Content -LiteralPath (Join-Path $script:installRoot 'my-work.tex') -Value 'private document'
     Assert ((& $nativeInventory) -ne $first)
+}
+Case 'preparation is automatic and does not alter caller preferences' {
+    $ErrorActionPreference='Continue'
+    Setup
+    Assert ($script:bootstrapCalls -eq 1)
+    Assert ($ErrorActionPreference -eq 'Continue')
+    Assert ((Read-TeXRecord $script:dir).status -eq 'complete')
+}
+Case 'bootstrap error blocks installation even with caller Continue preference' {
+    $ErrorActionPreference='Continue'
+    $script:failBootstrap=$true
+    Throws { Setup }
+    Assert ($script:apps.Count -eq 0)
+    Assert ((Read-TeXRecord $script:dir).status -eq 'prepared')
+    Assert ($ErrorActionPreference -eq 'Continue')
 }
 Write-Host "$script:count isolated PowerShell checks passed. No native Windows installation test."

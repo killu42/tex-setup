@@ -113,9 +113,12 @@ function Initialize-TeX {
     }
 }
 function Install-TeX([scriptblock]$Command) {
+    # Local only: callers need neither a preparation call nor a preference block.
+    $ErrorActionPreference = 'Stop'
     if (($Command.ToString().Trim() -replace '\s+',' ') -ne 'winget install --id MiKTeX.MiKTeX -e --scope user -s winget') {
         throw 'Nur der MiKTeX-Befehl aus der Anleitung ist erlaubt.'
     }
+    Initialize-TeX
     Use-TeXRecord {
         param($dir)
         $record = Read-TeXRecord $dir
