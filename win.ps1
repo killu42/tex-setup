@@ -1,4 +1,4 @@
-# Return the executable path only after successful WinGet setup.
+# Make winget available in the current PowerShell after successful setup.
 # Only WinGet is installed/updated here, never a TeX distribution.
 & {
     $ErrorActionPreference = 'Stop'
@@ -24,5 +24,5 @@
     }
     & $wg --version | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'WinGet kann nicht gestartet werden.' }
-    return $wg
+    $env:Path = (Split-Path -Parent $wg) + ';' + $env:Path
 }
