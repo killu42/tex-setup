@@ -1,9 +1,16 @@
 name: Exact PDF lifecycle
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [all, mac]
+        default: all
+        description: Full matrix or focused Apple Silicon recheck
 permissions: {}
 jobs:
   windows:
+    if: inputs.mode != 'mac'
     strategy:
       fail-fast: false
       matrix:
@@ -22,6 +29,7 @@ jobs:
           $test=Invoke-RestMethod "https://raw.githubusercontent.com/killu42/tex-setup/$env:TEST_REF/test-pdf-windows.ps1"
           & ([scriptblock]::Create($test)) -Scenario $env:SCENARIO
   unix:
+    if: inputs.mode != 'mac'
     strategy:
       fail-fast: false
       matrix:
@@ -43,6 +51,22 @@ jobs:
           NONINTERACTIVE: '1'
           HOMEBREW_NO_ANALYTICS: '1'
           DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          test_script=$(curl -fsSL --retry 3 "https://raw.githubusercontent.com/killu42/tex-setup/$TEST_REF/test-pdf-unix.sh")
+          bash -c "$test_script"
+  mac-recheck:
+    if: inputs.mode == 'mac'
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - name: Exact Mac PDF commands, including dependency preservation
+        shell: bash
+        env:
+          TEST_REF: ${{ github.sha }}
+          TEST_PLATFORM: mac
+          NONINTERACTIVE: '1'
+          HOMEBREW_NO_ANALYTICS: '1'
         run: |
           set -euo pipefail
           test_script=$(curl -fsSL --retry 3 "https://raw.githubusercontent.com/killu42/tex-setup/$TEST_REF/test-pdf-unix.sh")
