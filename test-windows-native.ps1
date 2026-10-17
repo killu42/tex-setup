@@ -159,12 +159,12 @@ try {
     Check ($managerRecord.baseline -eq $(if ($managerWasPresent) {'present'} else {'absent'})) 'WinGet provenance matches real initial state'
     $inventoryBefore = @(Get-InventoryRows)
     $compiler = Check-TeXExecutable
+    $editor = Join-Path (Split-Path -Parent $compiler) 'miktex-texworks.exe'
     $inventoryAfter = @(Get-InventoryRows)
     $inventoryDiff = @(Compare-Object $inventoryBefore $inventoryAfter)
     Write-Host "Inventory differences after pdfLaTeX --version: $($inventoryDiff.Count)"
     $inventoryDiff | Select-Object -First 30 | Format-Table -AutoSize | Out-Host
     Part 'Repair a missing shortcut on repeated setup' {
-        $editor = Join-Path (Split-Path -Parent (Get-TeXUpdater @(Get-TeXRegistrations)).File) 'miktex-texworks.exe'
         $shortcut = Find-TeXEditorShortcut $editor
         Check ([bool]$shortcut) 'First setup created a valid Start menu entry'
         Remove-Item -LiteralPath $shortcut -Force
