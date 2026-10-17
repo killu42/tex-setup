@@ -64,6 +64,12 @@ try {
     Write-Host "Scenario: $Scenario; tested script commit: $testedRef; PowerShell $($PSVersionTable.PSVersion)"
     $tracker = Invoke-RestMethod "$base/track.ps1"
     Invoke-Expression $tracker
+    $script:originalInventory = (Get-Item Function:Get-TeXInventory).ScriptBlock
+    $script:lastSavedRows = @()
+    function Get-TeXInventory {
+        $script:lastSavedRows = @(Get-InventoryRows)
+        & $script:originalInventory
+    }
     Check (-not (Test-Path -LiteralPath (Get-TeXRecordPath))) 'Fresh VM has no TeX ownership record'
     Check (-not (Test-Path -LiteralPath (Get-TeXManagerPath))) 'Fresh VM has no manager ownership record'
     Check (@(Get-TeXRegistrations).Count -eq 0 -and -not (Test-TeXFootprint)) 'Disposable VM starts without MiKTeX'
@@ -112,6 +118,18 @@ try {
     Stage 'Exact PDF installation command'
     Install-TeX { winget install --id MiKTeX.MiKTeX -e --scope user -s winget }
     $record = Read-TeXRecord (Get-TeXRecordPath)
+    Write-Host ('Saved registration: ' + ($record.registration | ConvertTo-Json -Compress))
+    Write-Host ('Current registration: ' + (@(Get-TeXRegistrations) | ConvertTo-Json -Compress))
+    Write-Host "Saved fingerprint: $($record.fingerprint)"
+    Write-Host "Current fingerprint: $(& $script:originalInventory)"
+    Write-Host 'Changes since saved inventory:'
+    if ($script:lastSavedRows.Count) { Compare-Object $script:lastSavedRows @(Get-InventoryRows) | Format-Table -AutoSize | Out-Host }
+    $shell = New-Object -ComObject WScript.Shell
+    foreach ($programs in @([Environment]::GetFolderPath('Programs'), [Environment]::GetFolderPath('CommonPrograms'))) {
+        Get-ChildItem -LiteralPath $programs -Filter '*TeX*.lnk' -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "Shortcut: $($_.FullName) -> $($shell.CreateShortcut($_.FullName).TargetPath)"
+        }
+    }
     Check ($record.status -eq 'complete') 'Native installation and update complete'
     Check ($record.baseline -eq $(if ($Scenario -eq 'existing') {'present'} else {'absent'})) 'MiKTeX provenance matches real initial state'
     $managerRecord = Read-TeXManagerRecord (Get-TeXManagerPath)
@@ -124,6 +142,8 @@ try {
     Write-Host "Inventory differences after pdfLaTeX --version: $($inventoryDiff.Count)"
     $inventoryDiff | Select-Object -First 30 | Format-Table -AutoSize | Out-Host
     Part 'Repeat the unchanged installation command' {
+        Write-Host "Fingerprint before repeat: $(& $script:originalInventory)"
+        if ($script:lastSavedRows.Count) { Compare-Object $script:lastSavedRows @(Get-InventoryRows) | Format-Table -AutoSize | Out-Host }
         Install-TeX { winget install --id MiKTeX.MiKTeX -e --scope user -s winget }
         Check ((Read-TeXRecord (Get-TeXRecordPath)).baseline -eq $record.baseline) 'Repeat update preserves original ownership'
     }
