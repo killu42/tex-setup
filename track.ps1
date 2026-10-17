@@ -360,6 +360,38 @@ function Test-TeXOwnedInventory($Record) {
     if ($Record.inventoryVersion -and $Record.inventoryVersion -ne 2) { throw 'Unbekannte Inventarversion. Nichts entfernt.' }
     (Get-TeXInventory -Stable:($Record.inventoryVersion -eq 2)) -eq $Record.fingerprint
 }
+function Get-TeXSetupAssessment($Record) {
+    # Read-only, local assessment. Never infer missing historical ownership.
+    $apps = @(Get-TeXRegistrations)
+    $kind = 'new'
+    $message = 'Neue Installation. Nach erfolgreichem Abschluss ist die geschuetzte Entfernung vorgesehen.'
+    if ($Record -and $Record.status -eq 'pending') {
+        throw 'Vorherige Installation unvollstaendig. Keine automatische Uebernahme oder Entfernung.'
+    }
+    if ($apps.Count -gt 1) { throw 'Mehrere MiKTeX-Installationen gefunden. Keine automatische Uebernahme.' }
+    if ($Record -and $Record.status -eq 'complete' -and $Record.baseline -eq 'absent') {
+        if (-not (Test-TeXOwnedRegistration $Record $apps)) {
+            throw 'Installation passt nicht zum gespeicherten Nachweis. Keine automatische Uebernahme.'
+        }
+        if ($Record.inventoryVersion -and $Record.inventoryVersion -ne 2) { throw 'Unbekannte Inventarversion. Keine automatische Uebernahme.' }
+        $kind = 'managed'
+        $message = 'Eigene Neuinstallation erkannt. Wiederholte Updates erhalten ihren Entfernungsnachweis.'
+        if (-not $Record.cleanupRootsFresh) {
+            $kind = 'legacy-protected'
+            $message = 'Alter Nachweis ohne vollstaendigen Ausgangszustand: Reparatur moeglich, automatische Deinstallation bleibt gesperrt.'
+        } elseif (-not (Test-TeXOwnedInventory $Record)) {
+            if ($Record.inventoryVersion -eq 2) { throw 'Programmdateien nachtraeglich veraendert. Keine automatische Uebernahme.' }
+            $kind = 'legacy-protected'
+            $message = 'Alter Dateinachweis stimmt nicht mehr ueberein: Reparatur moeglich, automatische Deinstallation bleibt gesperrt.'
+        }
+    } elseif (($Record -and $Record.baseline -eq 'present') -or $apps.Count -gt 0) {
+        $kind = 'existing'
+        $message = 'Vorhandenes MiKTeX bleibt einschliesslich Updates und TeXworks-Reparatur bei der Entfernung erhalten.'
+    } elseif (Test-TeXFootprint) {
+        throw 'TeX-Dateien ohne eindeutige Programmregistrierung gefunden. Keine zweite Installation angelegt.'
+    }
+    [pscustomobject]@{Kind=$kind; Message=$message}
+}
 function Initialize-TeX {
     Use-TeXRecord {
         param($dir)
@@ -377,6 +409,8 @@ function Initialize-TeX {
             Save-TeXRecord $dir $record
         }
         if ($record.status -eq 'pending') { throw 'Vorherige Installation unvollstaendig. Nachweis bleibt erhalten.' }
+        $assessment = Get-TeXSetupAssessment $record
+        Write-Host ('Automatische lokale Pruefung: ' + $assessment.Message)
         Initialize-TeXManager {
             $bootstrap = Invoke-RestMethod 'https://raw.githubusercontent.com/killu42/tex-setup/main/win.ps1' -ErrorAction Stop
             if ([string]::IsNullOrWhiteSpace($bootstrap)) { throw 'Download ist leer.' }

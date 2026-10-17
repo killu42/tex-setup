@@ -236,4 +236,61 @@ Case 'stable inventory rejects altered ordinary files and lock replacement' {
     $lock=Join-Path $folder 'lock'; [IO.File]::WriteAllText($lock,'x'); $first=& $nativeInventory -Stable
     [IO.File]::WriteAllText($lock,'different'); Assert ($first -ne (& $nativeInventory -Stable))
 }
+Case 'assessment of a new machine is read-only' {
+    $a=Get-TeXSetupAssessment $null; Assert ($a.Kind -eq 'new')
+    Assert (-not (Test-Path -LiteralPath $script:dir)); Assert ($script:bootstrapCalls -eq 0)
+}
+Case 'assessment recognizes untracked preexisting installation without adopting it' {
+    winget; Assert ((Get-TeXSetupAssessment $null).Kind -eq 'existing')
+    Assert (-not (Test-Path -LiteralPath $script:dir))
+}
+Case 'assessment reports owned complete installation without modifying evidence' {
+    Setup; $r=Read-TeXRecord $script:dir; $before=Get-Content (Join-Path $script:dir 'state.json') -Raw
+    Assert ((Get-TeXSetupAssessment $r).Kind -eq 'managed')
+    Assert ((Get-Content (Join-Path $script:dir 'state.json') -Raw) -ceq $before)
+    Assert ($script:updates -eq 1); Assert ($script:bootstrapCalls -eq 1)
+}
+Case 'assessment reports preexisting tracked installation as protected' {
+    winget; Setup; Assert ((Get-TeXSetupAssessment (Read-TeXRecord $script:dir)).Kind -eq 'existing')
+}
+Case 'assessment identifies missing old data provenance without inventing it' {
+    Setup; $r=Read-TeXRecord $script:dir; $r.PSObject.Properties.Remove('cleanupRootsFresh')
+    Assert ((Get-TeXSetupAssessment $r).Kind -eq 'legacy-protected')
+    Assert ($r.baseline -eq 'absent'); Assert (-not $r.cleanupRootsFresh)
+}
+Case 'assessment identifies changed old hash as protected not removable' {
+    Setup; $r=Read-TeXRecord $script:dir; $r.PSObject.Properties.Remove('inventoryVersion')
+    $script:fingerprint='runtime-change'
+    Assert ((Get-TeXSetupAssessment $r).Kind -eq 'legacy-protected'); Assert ($r.baseline -eq 'absent')
+}
+Case 'assessment accepts unchanged old hash with complete data provenance' {
+    Setup; $r=Read-TeXRecord $script:dir; $r.PSObject.Properties.Remove('inventoryVersion')
+    Assert ((Get-TeXSetupAssessment $r).Kind -eq 'managed')
+}
+Case 'assessment blocks changed modern files before any new bootstrap' {
+    Setup; $script:fingerprint='personal-file'; Throws { Setup }
+    Assert ($script:bootstrapCalls -eq 1); Assert ($script:updates -eq 1)
+}
+Case 'assessment checks old registration even when data provenance is missing' {
+    Setup; $r=Read-TeXRecord $script:dir; $r.PSObject.Properties.Remove('cleanupRootsFresh'); Save-TeXRecord $script:dir $r
+    $script:apps[0].Version='99'; Throws { Setup }
+    Assert ($script:bootstrapCalls -eq 1); Assert ((Read-TeXRecord $script:dir).baseline -eq 'absent')
+}
+Case 'assessment rejects unknown inventory versions before bootstrap' {
+    Setup; $r=Read-TeXRecord $script:dir; $r.inventoryVersion=99; Save-TeXRecord $script:dir $r
+    Throws { Setup }; Assert ($script:bootstrapCalls -eq 1)
+}
+Case 'assessment rejects pending records without adopting current programs' {
+    Setup; $r=Read-TeXRecord $script:dir; $r.status='pending'
+    Throws { Get-TeXSetupAssessment $r }; Assert ($r.baseline -eq 'absent')
+}
+Case 'assessment rejects multiple registrations and unknown footprints' {
+    winget; $script:apps += $script:apps[0]; Throws { Get-TeXSetupAssessment $null }
+    $script:apps=@(); $script:footprint=$true; Throws { Get-TeXSetupAssessment $null }
+}
+Case 'assessment is shown automatically by the unchanged installation command' {
+    $messages = @(Setup 6>&1 | Out-String)
+    Assert (($messages -join '') -match 'Automatische lokale Pruefung: Neue Installation')
+    Assert ($script:installs -eq 1)
+}
 Write-Host "$script:count isolated PowerShell checks passed. No native Windows installation test."
