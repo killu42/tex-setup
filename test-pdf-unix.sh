@@ -9,11 +9,29 @@ curl -fsSL --retry 3 "https://raw.githubusercontent.com/killu42/tex-setup/$TEST_
 read_command() { /usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$tex_work/commands.json" "$1"; }
 tex_install_block=$(read_command "$TEST_PLATFORM")
 tex_remove_block=$(read_command "${TEST_PLATFORM}_remove")
+if [ "${TEST_MANAGER_ABSENT:-0}" = 1 ]; then
+  # Disposable runner fixture only: test the unchanged PDF with no Homebrew.
+  [ "$TEST_PLATFORM" = mac ] && [ "$(uname -m)" = arm64 ]
+  [ "$(brew --prefix)" = /opt/homebrew ]
+  tex_brew_uninstaller=$(curl -fsSL --retry 3 https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)
+  NONINTERACTIVE=1 /bin/bash -c "$tex_brew_uninstaller" -- --path /opt/homebrew
+  if [ -d /opt/homebrew ]; then
+    test ! -L /opt/homebrew
+    sudo mv /opt/homebrew "$tex_work/runner-prefix-before-test"
+  fi
+  hash -r
+  test ! -x /opt/homebrew/bin/brew
+  ! command -v brew
+  printf 'PASS absent Homebrew baseline\n'
+fi
 printf '\\documentclass{article}\\begin{document}Test.\\end{document}\n' > "$tex_work/keep.tex"
 tex_doc_hash=$(shasum -a 256 "$tex_work/keep.tex")
 tex_git=$(command -v git)
 tex_git_hash=$(shasum -a 256 "$tex_git")
-if [ "$TEST_PLATFORM" = mac ]; then brew list --formula > "$tex_work/formulae-before"; fi
+if [ "$TEST_PLATFORM" = mac ]; then
+  if command -v brew >/dev/null; then brew list --formula > "$tex_work/formulae-before"
+  else : > "$tex_work/formulae-before"; fi
+fi
 if [ "$(uname -s)" = Darwin ]; then
   [ ! -x /Library/TeX/texbin/pdflatex ]
   if [ "$TEST_PLATFORM" = intel ]; then [ "$(uname -m)" = x86_64 ]; fi
