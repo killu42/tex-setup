@@ -1,18 +1,17 @@
 name: PDF lifecycle
 on:
-  push:
-    paths: ['mac.sh', 'win.ps1']
   workflow_dispatch:
     inputs:
-      linux_only:
-        type: boolean
-        default: false
-        description: Nur Linux (z.B. nach einer Linux-Befehlsaenderung)
+      platform:
+        type: choice
+        default: all
+        options: [all, windows, linux]
+        description: Systeme fuer den vollstaendigen Installationstest
 permissions:
   contents: read
 jobs:
   windows:
-    if: ${{ !inputs.linux_only }}
+    if: ${{ inputs.platform != 'linux' }}
     strategy:
       fail-fast: false
       matrix:
@@ -27,10 +26,11 @@ jobs:
       - shell: powershell
         run: ./test-pdf-windows.ps1 -Scenario ${{ matrix.scenario }}
   unix:
+    if: ${{ inputs.platform != 'windows' }}
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ inputs.linux_only && fromJSON('["ubuntu-24.04"]') || fromJSON('["ubuntu-24.04","macos-15","macos-15-intel"]') }}
+        os: ${{ inputs.platform == 'linux' && fromJSON('["ubuntu-24.04"]') || fromJSON('["ubuntu-24.04","macos-15","macos-15-intel"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 50
     steps:

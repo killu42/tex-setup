@@ -25,7 +25,11 @@ function Update-TeX {
     for ($pass = 0; $pass -lt 3; $pass++) {
         Invoke-MiKTeX @('packages','update-package-database')
         Invoke-MiKTeX @('packages','update')
-        & $miktex packages check-update | Out-Host
+        # A mirror timeout must not turn a completed update into an immediate failure.
+        for ($retry = 0; $retry -lt 3; $retry++) {
+            & $miktex packages check-update | Out-Host
+            if ($LASTEXITCODE -in @(0,100)) { break }
+        }
         if ($LASTEXITCODE -eq 0) { break }
         if ($LASTEXITCODE -ne 100 -or $pass -eq 2) { throw 'MiKTeX-Updates nicht abgeschlossen.' }
     }

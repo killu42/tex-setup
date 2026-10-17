@@ -33,6 +33,7 @@ function Invoke-MockMiKTeX([string[]]$Arguments) {
     if ($command -eq 'packages check-update') {
         $script:checks++
         if ($script:checks -le $script:updatesPending) { $global:LASTEXITCODE=100 }
+        if ($script:checks -le $script:checkFailures) { $global:LASTEXITCODE=1 }
     }
     if ($command -eq 'packages update' -and $script:failUpdate) { $global:LASTEXITCODE=5 }
     if ($command -like 'packages install miktex-texworks*') { [IO.File]::WriteAllText($script:editor,'mock executable') }
@@ -51,7 +52,7 @@ function Case($name,[scriptblock]$action) {
     $script:programs=Join-Path $dir 'Programs'
     $script:registrations=@([pscustomobject]@{DisplayName='MiKTeX';InstallLocation=$root})
     $script:links=@{}; $script:calls=[Collections.Generic.List[string]]::new()
-    $script:checks=0; $script:updatesPending=0; $script:failUpdate=$false
+    $script:checks=0; $script:updatesPending=0; $script:checkFailures=0; $script:failUpdate=$false
     $global:LASTEXITCODE=0
     $pathBefore=$env:Path
     try { & $action } finally { $env:Path=$pathBefore }
@@ -73,6 +74,14 @@ Case 'core update triggers another update pass' {
 }
 Case 'unfinished updates never report success' {
     $script:updatesPending=5; Throws {Update-TeX} 'Updates nicht abgeschlossen'
+}
+Case 'temporary update-check timeout is retried' {
+    $script:checkFailures=1; Update-TeX
+    Assert ($script:checks -eq 2) 'Timeout was not retried'
+}
+Case 'persistent update-check failure stops after three attempts' {
+    $script:checkFailures=10; Throws {Update-TeX} 'Updates nicht abgeschlossen'
+    Assert ($script:checks -eq 3 -and $script:links.Count -eq 0) 'Retry limit or failure handling wrong'
 }
 Case 'package update failure never reports success' {
     $script:failUpdate=$true; Throws {Update-TeX} 'MiKTeX fehlgeschlagen'
