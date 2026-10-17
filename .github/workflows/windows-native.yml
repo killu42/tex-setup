@@ -1,0 +1,25 @@
+name: Windows-Praxistest
+on:
+  workflow_dispatch:
+permissions: {}
+jobs:
+  native:
+    name: ${{ matrix.os }} - ${{ matrix.scenario }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, windows-11-arm]
+        scenario: [fresh, existing]
+    steps:
+      - name: Native installation, update, removal and preservation
+        shell: powershell
+        env:
+          TEST_SCENARIO: ${{ matrix.scenario }}
+          TEST_REF: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Invoke-RestMethod "https://raw.githubusercontent.com/killu42/tex-setup/$env:TEST_REF/test-windows-native.ps1"
+          if ([string]::IsNullOrWhiteSpace($source)) { throw 'Empty test download' }
+          & ([scriptblock]::Create($source)) -Scenario $env:TEST_SCENARIO
