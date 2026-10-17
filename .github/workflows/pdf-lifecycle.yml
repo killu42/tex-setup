@@ -4,9 +4,9 @@ on:
     inputs:
       mode:
         type: choice
-        options: [all, mac, bootstrap, winget]
+        options: [all, mac, bootstrap]
         default: all
-        description: Full matrix, focused Mac recheck, or missing package managers
+        description: Full matrix, focused Mac recheck, or missing Homebrew
 permissions: {}
 jobs:
   windows:
@@ -72,24 +72,6 @@ jobs:
           set -euo pipefail
           test_script=$(curl -fsSL --retry 3 "https://raw.githubusercontent.com/killu42/tex-setup/$TEST_REF/test-pdf-unix.sh")
           bash -c "$test_script"
-  missing-winget:
-    if: inputs.mode == 'bootstrap' || inputs.mode == 'winget'
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-2022]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
-    steps:
-      - name: Exact PDF lifecycle without pre-existing WinGet
-        shell: powershell
-        env:
-          TEST_REF: ${{ github.sha }}
-          TEST_MANAGER_ABSENT: '1'
-        run: |
-          $ErrorActionPreference='Stop'
-          $test=Invoke-RestMethod "https://raw.githubusercontent.com/killu42/tex-setup/$env:TEST_REF/test-pdf-windows.ps1"
-          & ([scriptblock]::Create($test)) -Scenario fresh
   mac-recheck:
     if: inputs.mode == 'mac'
     runs-on: macos-15
