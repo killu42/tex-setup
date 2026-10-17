@@ -1,5 +1,5 @@
 # REAL installation/removal test. Run only on a disposable GitHub-hosted VM.
-param([ValidateSet('fresh','existing')][string]$Scenario = 'fresh')
+param([ValidateSet('fresh','existing','manager-new')][string]$Scenario = 'fresh')
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT' -or $env:GITHUB_ACTIONS -ne 'true' -or
     $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:GITHUB_REPOSITORY -ne 'killu42/tex-setup') {
@@ -35,8 +35,10 @@ function Check-TeXExecutable {
     $compiler = Join-Path $bin 'pdflatex.exe'
     Check (Test-Path -LiteralPath $compiler -PathType Leaf) 'Real pdfLaTeX executable exists'
     Check (@(Get-ChildItem -LiteralPath $bin -Filter '*texworks*.exe').Count -gt 0) 'TeXworks editor executable exists'
-    & $compiler --version | Select-Object -First 2 | Out-Host
-    Check ($LASTEXITCODE -eq 0) 'Real pdfLaTeX starts'
+    $versionOutput = & $compiler --version
+    $versionExit = $LASTEXITCODE
+    $versionOutput | Out-Host
+    Check ($versionExit -eq 0) "Real pdfLaTeX starts (exit $versionExit)"
     $compiler
 }
 $failed = $false
@@ -62,6 +64,25 @@ try {
     Check (-not (Test-Path -LiteralPath (Get-TeXRecordPath))) 'Early remove creates no TeX record'
     Check (-not (Test-Path -LiteralPath (Get-TeXManagerPath))) 'Early remove creates no manager record'
 
+    if ($Scenario -eq 'manager-new') {
+        Stage 'Create a missing-WinGet fixture in this disposable VM only'
+        $fixtureApps = @(Get-TeXManagerPackages)
+        if ($fixtureApps.Count -gt 0) {
+            $fixtureIdentity = Get-TeXManagerIdentity $fixtureApps
+            Check (-not $fixtureApps[0].NonRemovable) 'VM App Installer allows current-user removal'
+            Remove-AppxPackage -Package $fixtureIdentity.PackageFullName -ErrorAction Stop
+        }
+        Check (@(Get-TeXManagerPackages).Count -eq 0 -and -not (Test-TeXManagerCommand)) 'Missing-WinGet fixture has no App Installer or winget command'
+        Stage 'Real installation of previously absent WinGet'
+        Initialize-TeXManager { Invoke-Expression (Invoke-RestMethod "$base/win.ps1") }
+        $managerRecord = Read-TeXManagerRecord (Get-TeXManagerPath)
+        Check ($managerRecord.status -eq 'complete' -and $managerRecord.baseline -eq 'absent') 'New WinGet recorded as newly installed'
+        Check (@(Get-TeXManagerPackages).Count -eq 1 -and (Test-TeXManagerCommand)) 'New WinGet is actually installed'
+        Stage 'Real removal of newly installed WinGet'
+        Remove-TeXManager
+        Check (@(Get-TeXManagerPackages).Count -eq 0) 'New WinGet App Installer removed'
+        Check (-not (Test-Path -LiteralPath (Get-TeXManagerPath))) 'Manager record removed after successful uninstall'
+    } else {
     if ($Scenario -eq 'existing') {
         Stage 'Create a real preexisting MiKTeX fixture, outside the tracker'
         Invoke-Expression (Invoke-RestMethod "$base/win.ps1")
@@ -105,6 +126,7 @@ try {
     } else {
         Check (@(Get-TeXManagerPackages).Count -eq 0) 'New WinGet App Installer removed'
         Check (-not (Test-Path -LiteralPath (Get-TeXManagerPath))) 'Manager record removed after successful uninstall'
+    }
     }
     Stage 'Unrelated programs and own documents'
     $afterPrograms = @(Get-OtherPrograms)
