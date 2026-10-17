@@ -32,7 +32,7 @@ jobs:
       matrix:
         os: ${{ inputs.platform == 'intel' && fromJSON('["macos-15-intel"]') || inputs.platform == 'linux' && fromJSON('["ubuntu-24.04"]') || inputs.platform == 'mac' && fromJSON('["macos-15","macos-15-intel"]') || fromJSON('["ubuntu-24.04","macos-15","macos-15-intel"]') }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 180
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
         with:
