@@ -17,6 +17,22 @@ function Check([bool]$Value,[string]$Message) {
     Write-Host "PASS: $Message"
 }
 function Stage([string]$Name) { $script:stage=$Name; Write-Host "STAGE: $Name" }
+function Record-Failure($Failure) {
+    $script:failed = $true
+    $script:checks.Add("FAIL at $script:stage : $($Failure.Exception.Message)")
+    Write-Host "::error::Native test failed at $script:stage : $($Failure.Exception.Message)"
+    Write-Host $Failure.ScriptStackTrace
+}
+function Part([string]$Name,[scriptblock]$Action) {
+    Stage $Name
+    try { & $Action } catch { Record-Failure $_ }
+}
+function Get-InventoryRows {
+    $root = Get-TeXInstallRoot
+    Get-ChildItem -LiteralPath $root -Recurse -Force | ForEach-Object {
+        '{0}|{1}|{2}' -f $_.FullName.Substring($root.Length), $_.Length, $_.LastWriteTimeUtc.Ticks
+    } | Sort-Object
+}
 function Get-OtherPrograms {
     foreach ($root in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
         'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
@@ -41,7 +57,7 @@ function Check-TeXExecutable {
     Check ($versionExit -eq 0) "Real pdfLaTeX starts (exit $versionExit)"
     $compiler
 }
-$failed = $false
+$script:failed = $false
 try {
     $os = Get-CimInstance Win32_OperatingSystem
     Write-Host "OS: $($os.Caption); build $($os.BuildNumber); architecture $env:PROCESSOR_ARCHITECTURE"
@@ -101,14 +117,21 @@ try {
     $managerRecord = Read-TeXManagerRecord (Get-TeXManagerPath)
     Check ($managerRecord.status -eq 'complete') 'Native manager bootstrap complete'
     Check ($managerRecord.baseline -eq $(if ($managerWasPresent) {'present'} else {'absent'})) 'WinGet provenance matches real initial state'
+    $inventoryBefore = @(Get-InventoryRows)
     $compiler = Check-TeXExecutable
-    Stage 'Repeat the unchanged installation command'
-    Install-TeX { winget install --id MiKTeX.MiKTeX -e --scope user -s winget }
-    Check ((Read-TeXRecord (Get-TeXRecordPath)).baseline -eq $record.baseline) 'Repeat update preserves original ownership'
-    Stage 'Compile a real minimal document'
-    & $compiler --disable-installer --interaction=nonstopmode --halt-on-error "--output-directory=$testDir" $document | Out-Host
-    Check ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath (Join-Path $testDir 'keep.pdf'))) 'Real document compiles to PDF'
-    Stage 'Native TeX removal'
+    $inventoryAfter = @(Get-InventoryRows)
+    $inventoryDiff = @(Compare-Object $inventoryBefore $inventoryAfter)
+    Write-Host "Inventory differences after pdfLaTeX --version: $($inventoryDiff.Count)"
+    $inventoryDiff | Select-Object -First 30 | Format-Table -AutoSize | Out-Host
+    Part 'Repeat the unchanged installation command' {
+        Install-TeX { winget install --id MiKTeX.MiKTeX -e --scope user -s winget }
+        Check ((Read-TeXRecord (Get-TeXRecordPath)).baseline -eq $record.baseline) 'Repeat update preserves original ownership'
+    }
+    Part 'Compile a real minimal document' {
+        & $compiler --disable-installer --interaction=nonstopmode --halt-on-error "--output-directory=$testDir" $document | Out-Host
+        Check ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath (Join-Path $testDir 'keep.pdf'))) 'Real document compiles to PDF'
+    }
+    Part 'Native TeX removal' {
     Remove-TeX
     if ($Scenario -eq 'fresh') {
         Check (@(Get-TeXRegistrations).Count -eq 0) 'New MiKTeX registration removed'
@@ -119,7 +142,8 @@ try {
     }
     Check (-not (Test-Path -LiteralPath (Get-TeXRecordPath))) 'Completed TeX record removed'
     Check (Test-Path -LiteralPath (Get-TeXManagerPath)) 'Manager evidence survives TeX removal'
-    Stage 'Native package-manager removal'
+    }
+    Part 'Native package-manager removal' {
     Remove-TeXManager
     if ($managerWasPresent) {
         Check (@(Get-TeXManagerPackages).Count -gt 0 -and (Test-TeXManagerCommand)) 'Preexisting WinGet and updates retained'
@@ -128,17 +152,16 @@ try {
         Check (-not (Test-Path -LiteralPath (Get-TeXManagerPath))) 'Manager record removed after successful uninstall'
     }
     }
-    Stage 'Unrelated programs and own documents'
+    }
+    Part 'Unrelated programs and own documents' {
     $afterPrograms = @(Get-OtherPrograms)
     Check (@($otherPrograms | Where-Object { $_ -notin $afterPrograms }).Count -eq 0) 'All preexisting unrelated program registrations retained'
     Check ((Get-FileHash -LiteralPath $gitPath -Algorithm SHA256).Hash -eq $gitHash) 'Preexisting Git executable unchanged'
     Check ((Get-FileHash -LiteralPath $document -Algorithm SHA256).Hash -eq $documentHash) 'Own TeX document unchanged'
-    Write-Host 'NATIVE TEST COMPLETED SUCCESSFULLY'
+    }
+    if (-not $script:failed) { Write-Host 'NATIVE TEST COMPLETED SUCCESSFULLY' }
 } catch {
-    $failed = $true
-    $script:checks.Add("FAIL at $script:stage : $($_.Exception.Message)")
-    Write-Host "::error::Native test failed at $script:stage : $($_.Exception.Message)"
-    Write-Host $_.ScriptStackTrace
+    Record-Failure $_
 } finally {
     if ($env:GITHUB_STEP_SUMMARY) {
         @("## Native Windows test: $Scenario", "Tested script commit: $testedRef", '',
@@ -147,4 +170,4 @@ try {
             Out-File -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
     }
 }
-if ($failed) { exit 1 }
+if ($script:failed) { exit 1 }
