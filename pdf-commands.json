@@ -1,0 +1,10 @@
+{
+  "mac": "s=$(curl -fsSL https://raw.githubusercontent.com/killu42/tex-setup/main/mac.sh) && eval \"$s\" &&\nbrew install --cask mactex",
+  "intel": "s=$(curl -fsSL https://raw.githubusercontent.com/killu42/tex-setup/main/intel.sh) && bash -c \"$s\"",
+  "linux": "sudo apt update && sudo apt install texlive-latex-extra texlive-lang-german \\\ntexlive-fonts-recommended biber latexmk texstudio",
+  "windows": "irm https://raw.githubusercontent.com/killu42/tex-setup/main/install.ps1 | iex\nInstall-TeX { winget install --id MiKTeX.MiKTeX -e --scope user -s winget }",
+  "mac_remove": "brew uninstall --cask mactex",
+  "intel_remove": "s=$(curl -fsSL https://raw.githubusercontent.com/killu42/tex-setup/main/intel-remove.sh) && bash -c \"$s\"",
+  "linux_remove": "sudo apt remove '~n^texlive' '~n^texstudio' biber latexmk",
+  "windows_remove": "irm https://raw.githubusercontent.com/killu42/tex-setup/main/uninstall.ps1 | iex"
+}
