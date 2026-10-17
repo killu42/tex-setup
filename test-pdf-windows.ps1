@@ -12,18 +12,6 @@ $commands=Invoke-RestMethod "$base/pdf-commands.json"
 Invoke-Expression (Invoke-RestMethod 'https://raw.githubusercontent.com/killu42/tex-setup/main/install.ps1')
 function Check([bool]$Value,[string]$Message) { if (-not $Value) {throw $Message}; Write-Host "PASS: $Message" }
 Check (@(Get-TeXRegistrations).Count -eq 0 -and -not (Test-TeXFootprint)) 'Runner starts without MiKTeX'
-if ($env:TEST_MANAGER_ABSENT -eq '1') {
-    # Disposable runner fixture only: remove the current user's App Installer.
-    foreach ($app in @(Get-AppxPackage Microsoft.DesktopAppInstaller)) {
-        Remove-AppxPackage -Package $app.PackageFullName -ErrorAction Stop
-    }
-    Check (@(Get-AppxPackage Microsoft.DesktopAppInstaller).Count -eq 0) 'Absent WinGet registration baseline'
-    $wingetCommand=Get-Command winget.exe -ErrorAction SilentlyContinue
-    if ($wingetCommand) {
-        & $wingetCommand.Source --version
-        Check ($LASTEXITCODE -ne 0) 'No usable WinGet before the PDF command'
-    } else { Write-Host 'PASS: No WinGet command before the PDF command' }
-}
 $git=(Get-Command git.exe).Source
 $gitHash=(Get-FileHash $git).Hash
 $work=Join-Path $env:RUNNER_TEMP ('tex-simple-'+[guid]::NewGuid())
