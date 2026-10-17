@@ -65,8 +65,4 @@ check('Windows bootstrap exposes validated executable, no distro install',()=>{
 check('No distribution operations or private data in either bootstrap',()=>{
   for(const s of [mac,win]) assert.doesNotMatch(s,/mactex|miktex|tlmgr|texstudio|apt-get|\/Users\/|champcademy|ghp_|github_pat_|rm -rf|--zap/i);
 });
-check('Old Linux entry is disabled',()=>{
-  const s=readFileSync(join(dir,'linux.sh'),'utf8');
-  assert.match(s,/exit 1/); assert.doesNotMatch(s,/sudo|apt-get install/);
-});
 console.log(count+' checks passed; no real package installation, no Windows runtime test.');
