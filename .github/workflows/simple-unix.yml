@@ -1,0 +1,61 @@
+name: Simple Unix lifecycle
+on:
+  pull_request:
+    paths: ['.github/workflows/simple-unix.yml']
+  workflow_dispatch:
+permissions: {}
+jobs:
+  unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - name: Real install, repeat, compile and remove
+        shell: bash
+        env:
+          TEST_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+          HOMEBREW_NO_ANALYTICS: '1'
+          NONINTERACTIVE: '1'
+        run: |
+          set -euo pipefail
+          [ "$GITHUB_ACTIONS:$RUNNER_ENVIRONMENT:$GITHUB_REPOSITORY" = true:github-hosted:killu42/tex-setup ]
+          base="https://raw.githubusercontent.com/killu42/tex-setup/$TEST_REF"
+          work=$(mktemp -d "$RUNNER_TEMP/simple-tex.XXXXXX")
+          printf '\\documentclass{article}\\begin{document}Test.\\end{document}\n' > "$work/keep.tex"
+          doc_hash=$(shasum -a 256 "$work/keep.tex")
+          git_path=$(command -v git)
+          git_hash=$(shasum -a 256 "$git_path")
+          if [ "$(uname -s)" = Darwin ]; then
+            bootstrap=$(curl -fsSL --retry 3 "$base/mac.sh")
+            eval "$bootstrap"
+            brew install --cask mactex
+            brew install --cask mactex
+            test -x /Applications/TeX/TeXShop.app/Contents/MacOS/TeXShop
+            /Library/TeX/texbin/pdflatex -interaction=nonstopmode -halt-on-error -output-directory="$work" "$work/keep.tex"
+            remover=$(curl -fsSL --retry 3 "$base/simple/mac-remove.sh")
+            bash -c "$remover"
+            bash -c "$remover"
+            test ! -e /Applications/TeX/TeXShop.app
+            test -z "$(brew list --cask --versions mactex)"
+            brew --version
+          else
+            setup=$(curl -fsSL --retry 3 "$base/simple/linux.sh")
+            bash -c "$setup" -- remove
+            bash -c "$setup" -- install
+            bash -c "$setup" -- install
+            command -v texstudio
+            test -f /usr/share/applications/texstudio.desktop
+            pdflatex -interaction=nonstopmode -halt-on-error -output-directory="$work" "$work/keep.tex"
+            bash -c "$setup" -- remove
+            bash -c "$setup" -- remove
+            ! command -v texstudio
+            ! command -v pdflatex
+            apt-get --version
+          fi
+          test -s "$work/keep.pdf"
+          [ "$(shasum -a 256 "$work/keep.tex")" = "$doc_hash" ]
+          [ "$(shasum -a 256 "$git_path")" = "$git_hash" ]
+          echo 'PASS: simple native Unix lifecycle; document and unrelated program preserved'
