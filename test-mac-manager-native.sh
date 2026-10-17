@@ -38,9 +38,13 @@ if tex_brew_path; then
   NONINTERACTIVE=1 /bin/bash -c "$tex_test_uninstaller" -- --path "$tex_test_prefix"
 fi
 hash -r
-# An empty ARM prefix is a footprint too. Only an empty directory may go.
+# The official uninstaller preserves non-Homebrew leftovers in this runner
+# image. Move those disposable fixture leftovers aside, do not delete them.
+# This is test preparation only, never part of the distributed uninstaller.
 if [ "$tex_test_prefix" = /opt/homebrew ] && [ -d /opt/homebrew ]; then
-  sudo rmdir /opt/homebrew
+  check test ! -L /opt/homebrew
+  check test ! -e "$tex_test_dir/runner-prefix-before-test"
+  sudo mv /opt/homebrew "$tex_test_dir/runner-prefix-before-test"
 fi
 check test ! -e "$tex_test_prefix/bin/brew"
 if tex_manager_existing; then printf 'Fixture still contains Homebrew.\n'; exit 1; fi
