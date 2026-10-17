@@ -4,7 +4,7 @@ on:
     inputs:
       mode:
         type: choice
-        options: [all, mac, bootstrap]
+        options: [all, mac, bootstrap, winget]
         default: all
         description: Full matrix, focused Mac recheck, or missing package managers
 permissions: {}
@@ -73,11 +73,11 @@ jobs:
           test_script=$(curl -fsSL --retry 3 "https://raw.githubusercontent.com/killu42/tex-setup/$TEST_REF/test-pdf-unix.sh")
           bash -c "$test_script"
   missing-winget:
-    if: inputs.mode == 'bootstrap'
+    if: inputs.mode == 'bootstrap' || inputs.mode == 'winget'
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2025, windows-11-arm]
+        os: [windows-2022]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     steps:
