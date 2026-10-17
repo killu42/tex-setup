@@ -208,6 +208,15 @@ Case 'old record with unverifiable inventory permits repair but never deletion' 
     Assert ((Read-TeXRecord $script:dir).baseline -eq 'present')
     Remove-TeX; Assert ($script:removals -eq 0)
 }
+Case 'old settings provenance never grants automatic removal' {
+    Setup; $r=Read-TeXRecord $script:dir; $r.PSObject.Properties.Remove('cleanupRootsFresh'); Save-TeXRecord $script:dir $r
+    Setup; Assert ((Read-TeXRecord $script:dir).baseline -eq 'present')
+    Remove-TeX; Assert ($script:removals -eq 0)
+}
+Case 'direct removal of old settings provenance preserves installation' {
+    Setup; $r=Read-TeXRecord $script:dir; $r.PSObject.Properties.Remove('cleanupRootsFresh'); Save-TeXRecord $script:dir $r
+    Remove-TeX; Assert ($script:removals -eq 0); Assert ($script:apps.Count -eq 1)
+}
 Case 'stable inventory ignores only ordinary runtime lock timestamps' {
     $folder=Join-Path $script:installRoot 'miktex'; [void][IO.Directory]::CreateDirectory($folder)
     $lock=Join-Path $folder 'lock'; [IO.File]::WriteAllText($lock,'x')

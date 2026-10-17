@@ -62,17 +62,40 @@ function Check-EditorLaunch {
     $editor = Join-Path (Split-Path -Parent (Get-TeXUpdater @(Get-TeXRegistrations)).File) 'miktex-texworks.exe'
     $shortcut = Find-TeXEditorShortcut $editor
     Check ([bool]$shortcut) 'Start menu contains a shortcut to this TeXworks'
+    Write-Host "GUI session: $((Get-Process -Id $PID).SessionId); interactive: $([Environment]::UserInteractive)"
+    Get-Process -Name '*texworks*' -ErrorAction SilentlyContinue | Select-Object Id,Path,SessionId,MainWindowHandle | Format-List | Out-Host
     $process = Start-Process -FilePath $editor -PassThru
     try {
-        [void]$process.WaitForInputIdle(15000)
-        Start-Sleep -Seconds 3
+        # TeXworks is single-instance: a second process may exit after handing
+        # off to an already running editor. Inspect the matching application,
+        # not just the launcher PID, and allow first-start initialization.
+        $deadline = [DateTime]::UtcNow.AddSeconds(60)
+        do {
+            $windows = @(Get-Process -Name '*texworks*' -ErrorAction SilentlyContinue |
+                Where-Object { $_.Path -eq $editor -and $_.MainWindowHandle -ne 0 })
+            if ($windows.Count -gt 0) { break }
+            Start-Sleep -Seconds 1
+        } while ([DateTime]::UtcNow -lt $deadline)
+        Get-Process -Name '*texworks*' -ErrorAction SilentlyContinue | Select-Object Id,Path,SessionId,MainWindowHandle | Format-List | Out-Host
         $process.Refresh()
-        Check (-not $process.HasExited -and $process.MainWindowHandle -ne 0) 'Real TeXworks opens a GUI window'
+        Write-Host "Launched editor exited: $($process.HasExited); exit code: $($process.ExitCode)"
+        if ($windows.Count -eq 0) {
+            $log = Join-Path $env:LOCALAPPDATA 'MiKTeX\miktex\log\texworks.log'
+            if (Test-Path $log) { Get-Content -LiteralPath $log -Tail 60 | Out-Host }
+        }
+        Check ($windows.Count -gt 0) 'Real TeXworks opens a GUI window'
     } finally {
         $process.Refresh()
         if (-not $process.HasExited) {
             [void]$process.CloseMainWindow()
             if (-not $process.WaitForExit(10000)) { Stop-Process -Id $process.Id -Force }
+        }
+        foreach ($window in @($windows)) {
+            $window.Refresh()
+            if (-not $window.HasExited) {
+                [void]$window.CloseMainWindow()
+                if (-not $window.WaitForExit(10000)) { Stop-Process -Id $window.Id -Force }
+            }
         }
     }
 }

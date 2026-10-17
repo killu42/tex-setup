@@ -188,8 +188,12 @@ function Get-TeXRegistrations {
     }
 }
 function Get-TeXInstallRoot { Join-Path $env:LOCALAPPDATA 'Programs\MiKTeX' }
+function Get-TeXDataRoots {
+    @((Join-Path $env:APPDATA 'MiKTeX'), (Join-Path $env:LOCALAPPDATA 'MiKTeX'))
+}
 function Test-TeXFootprint {
     (Test-Path -LiteralPath (Get-TeXInstallRoot)) -or
+        @((Get-TeXDataRoots) | Where-Object { Test-Path -LiteralPath $_ }).Count -gt 0 -or
         [bool](Get-Command miktex.exe,pdflatex.exe -ErrorAction SilentlyContinue)
 }
 function Test-TeXAdministrator {
@@ -322,8 +326,7 @@ function Get-TeXInventory([switch]$Stable) {
     $root = Get-TeXInstallRoot
     Assert-TeXPlainPath $root
     if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw 'MiKTeX-Programmordner fehlt.' }
-    # Metadata guards later user additions and modifications. No personal
-    # AppData settings/cache directories are deleted by our code.
+    # Metadata guards later user additions and modifications in the program tree.
     $rows = @(Get-ChildItem -LiteralPath $root -Recurse -Force -ErrorAction Stop | ForEach-Object {
         if ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Link im Programmordner; keine automatische Entfernung.' }
         $relative = $_.FullName.Substring($root.Length)
@@ -366,6 +369,7 @@ function Initialize-TeX {
             $record = [pscustomobject]@{
                 schema=1; user=(Get-TeXUser)
                 baseline=$(if ($present) {'present'} else {'absent'}); status='prepared'
+                cleanupRootsFresh=(-not $present)
                 registration=@(); fingerprint=''
                 appInstallerBefore=@(Get-AppxPackage Microsoft.DesktopAppInstaller | Select-Object Name,Version,PackageFullName)
                 helpers='Shared infrastructure; not automatically removed'
@@ -392,6 +396,14 @@ function Install-TeX([scriptblock]$Command) {
         $record = Read-TeXRecord $dir
         if (-not $record -or $record.status -eq 'pending') { throw 'Kein gueltiger Installationsbeginn.' }
         $apps = @(Get-TeXRegistrations)
+        if ($record.status -eq 'complete' -and $record.baseline -eq 'absent') {
+            if (-not $record.cleanupRootsFresh) {
+                # Old records did not inventory preexisting MiKTeX settings.
+                # Permit repair, but do not authorize a new automatic cleanup.
+                $record.baseline = 'present'
+                Write-Host 'Aeltere Installation wird repariert und vor automatischer Entfernung geschuetzt.'
+            }
+        }
         if ($record.status -eq 'complete' -and $record.baseline -eq 'absent') {
             if (-not (Test-TeXOwnedRegistration $record $apps)) {
                 throw 'Installation nachtraeglich veraendert; Nachweis bleibt unveraendert.'
@@ -438,6 +450,33 @@ function Install-TeX([scriptblock]$Command) {
         Write-Host 'MiKTeX installiert/aktualisiert. Lokales Protokoll gespeichert.'
     }
 }
+function Read-TeXConfigReport([string]$File) {
+    $PSNativeCommandUseErrorActionPreference = $false
+    $report = @(& $File --report)
+    if ($null -eq $LASTEXITCODE -or $LASTEXITCODE -ne 0) { throw 'MiKTeX-Konfiguration nicht lesbar. Nichts entfernt.' }
+    $report
+}
+function Assert-TeXRemovalRoots($Updater) {
+    $reporter = Join-Path (Split-Path -Parent $Updater.File) 'initexmf.exe'
+    Assert-TeXPlainPath $reporter
+    if (-not (Test-Path -LiteralPath $reporter -PathType Leaf)) { throw 'MiKTeX-Konfigurationspruefung fehlt. Nichts entfernt.' }
+    $report = @(Read-TeXConfigReport $reporter)
+    $data = @(Get-TeXDataRoots)
+    $expected = @{UserInstall=(Get-TeXInstallRoot); UserConfig=$data[0]; UserData=$data[1]}
+    foreach ($key in @('UserInstall','UserConfig','UserData')) {
+        $values = @($report | Where-Object { $_ -match "^${key}:\s*(.+)$" } | ForEach-Object { ($_ -split ':\s*',2)[1].Trim() })
+        if ($values.Count -ne 1 -or -not [IO.Path]::IsPathRooted($values[0]) -or
+            [IO.Path]::GetFullPath($values[0]).TrimEnd('\','/') -ine [IO.Path]::GetFullPath($expected[$key]).TrimEnd('\','/')) {
+            throw 'Benutzerdefinierte MiKTeX-Datenordner bleiben geschuetzt. Nichts entfernt.'
+        }
+        Assert-TeXPlainPath $expected[$key]
+        if (Test-Path -LiteralPath $expected[$key]) {
+            $links = @(Get-ChildItem -LiteralPath $expected[$key] -Recurse -Force -ErrorAction Stop |
+                Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })
+            if ($links.Count -gt 0) { throw 'Link in MiKTeX-Datenordnern. Nichts entfernt.' }
+        }
+    }
+}
 function Invoke-TeXUninstall {
     # WinGet's registered uninstall command only opens MiKTeX Console's GUI.
     # Use the integrated vendor utility from the already verified installation.
@@ -446,6 +485,7 @@ function Invoke-TeXUninstall {
     $uninstaller = Join-Path (Split-Path -Parent $updater.File) 'miktexsetup.exe'
     if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw 'MiKTeX-Uninstaller fehlt. Nichts entfernt.' }
     Assert-TeXPlainPath $uninstaller
+    Assert-TeXRemovalRoots $updater
     $code = Invoke-TeXNative $uninstaller @('--verbose','--shared=no','uninstall')
     if ($null -eq $code -or $code -ne 0) { throw "MiKTeX-Deinstallation fehlgeschlagen ($code)." }
 }
@@ -454,7 +494,7 @@ function Remove-TeX {
         param($dir)
         $record = Read-TeXRecord $dir
         if (-not $record -or $record.status -ne 'complete') { throw 'Kein abgeschlossener Nachweis. Nichts entfernt.' }
-        if ($record.baseline -eq 'present') {
+        if ($record.baseline -eq 'present' -or -not $record.cleanupRootsFresh) {
             Write-Host 'Vorhandenes MiKTeX und seine Updates bleiben erhalten.'
         } else {
             $apps = @(Get-TeXRegistrations)
