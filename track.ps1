@@ -76,6 +76,70 @@ function Get-TeXRegistrations {
     }
 }
 function Get-TeXInstallRoot { Join-Path $env:LOCALAPPDATA 'Programs\MiKTeX' }
+function Test-TeXFootprint {
+    (Test-Path -LiteralPath (Get-TeXInstallRoot)) -or
+        [bool](Get-Command miktex.exe,pdflatex.exe -ErrorAction SilentlyContinue)
+}
+function Test-TeXAdministrator {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+    $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+function Get-TeXUpdater($Apps) {
+    if (@($Apps).Count -ne 1) { throw 'MiKTeX-Installation nicht eindeutig. Keine zweite Installation angelegt.' }
+    $app = @($Apps)[0]
+    $admin = $app.Key -like 'HKEY_LOCAL_MACHINE\*'
+    if (-not $admin -and $app.Key -notlike 'HKEY_CURRENT_USER\*') { throw 'Unbekannter MiKTeX-Installationsbereich.' }
+    if ($admin -and -not (Test-TeXAdministrator)) {
+        throw 'Dieses MiKTeX wurde fuer alle Benutzer installiert. PowerShell als Administrator starten und den Befehl erneut ausfuehren.'
+    }
+    $root = $app.Location
+    if ([string]::IsNullOrWhiteSpace($root) -and -not $admin) { $root = Get-TeXInstallRoot }
+    if ([string]::IsNullOrWhiteSpace($root) -or -not [IO.Path]::IsPathRooted($root)) {
+        throw 'MiKTeX-Installationsordner nicht eindeutig. Keine zweite Installation angelegt.'
+    }
+    Assert-TeXPlainPath $root
+    # Resolve only inside the registered installation, never a different PATH copy.
+    $bin = Join-Path (Join-Path $root 'miktex') 'bin'
+    Assert-TeXPlainPath (Join-Path $root 'miktex')
+    Assert-TeXPlainPath $bin
+    $candidates = @(
+        (Join-Path (Join-Path $bin 'x64') 'miktex.exe'),
+        (Join-Path $bin 'miktex.exe')
+    )
+    $files = @($candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+    if ($files.Count -ne 1) { throw 'MiKTeX-Updater fehlt oder ist nicht eindeutig. Keine zweite Installation angelegt.' }
+    Assert-TeXPlainPath (Split-Path -Parent $files[0])
+    Assert-TeXPlainPath $files[0]
+    [pscustomobject]@{ File=$files[0]; Admin=$admin; Key=$app.Key; Location=$app.Location }
+}
+function Invoke-TeXNative([string]$File, [string[]]$Arguments) {
+    # check-update uses exit code 100 for available updates, not an execution error.
+    $PSNativeCommandUseErrorActionPreference = $false
+    & $File @Arguments | Out-Host
+    $LASTEXITCODE
+}
+function Update-TeX($Updater) {
+    # Shared packages need --admin; also update this user's own packages.
+    $modes = @($false)
+    if ($Updater.Admin) { $modes = @($true, $false) }
+    foreach ($admin in $modes) {
+        $prefix = @()
+        if ($admin) { $prefix = @('--admin') }
+        $finished = $false
+        # A core update can require another invocation of the newly updated utility.
+        for ($pass = 0; $pass -lt 3; $pass++) {
+            foreach ($command in @('update-package-database', 'update')) {
+                $code = Invoke-TeXNative $Updater.File ($prefix + @('packages', $command))
+                if ($null -eq $code -or $code -ne 0) { throw "MiKTeX-Aktualisierung fehlgeschlagen ($command, $code)." }
+            }
+            $code = Invoke-TeXNative $Updater.File ($prefix + @('packages', 'check-update'))
+            if ($null -ne $code -and $code -eq 0) { $finished = $true; break }
+            if ($null -eq $code -or $code -ne 100) { throw "MiKTeX-Updatepruefung fehlgeschlagen ($code)." }
+        }
+        if (-not $finished) { throw 'MiKTeX meldet weiterhin offene Updates. Aktualisierung nicht als abgeschlossen vermerkt.' }
+    }
+}
 function Get-TeXInventory {
     $root = Get-TeXInstallRoot
     Assert-TeXPlainPath $root
@@ -95,9 +159,7 @@ function Initialize-TeX {
         param($dir)
         $record = Read-TeXRecord $dir
         if (-not $record) {
-            $present = @(Get-TeXRegistrations).Count -gt 0 -or
-                (Test-Path -LiteralPath (Get-TeXInstallRoot)) -or
-                [bool](Get-Command miktex.exe,pdflatex.exe -ErrorAction SilentlyContinue)
+            $present = @(Get-TeXRegistrations).Count -gt 0 -or (Test-TeXFootprint)
             $record = [pscustomobject]@{
                 schema=1; user=(Get-TeXUser)
                 baseline=$(if ($present) {'present'} else {'absent'}); status='prepared'
@@ -123,22 +185,37 @@ function Install-TeX([scriptblock]$Command) {
         param($dir)
         $record = Read-TeXRecord $dir
         if (-not $record -or $record.status -eq 'pending') { throw 'Kein gueltiger Installationsbeginn.' }
+        $apps = @(Get-TeXRegistrations)
         if ($record.status -eq 'complete' -and $record.baseline -eq 'absent') {
-            if ((Get-TeXInventory) -ne $record.fingerprint) { throw 'Installation nachtraeglich veraendert; Nachweis bleibt unveraendert.' }
+            $saved = @($record.registration)
+            if ($saved.Count -ne 1 -or $apps.Count -ne 1 -or $apps[0].Key -ne $saved[0].Key -or
+                $apps[0].Key -notlike 'HKEY_CURRENT_USER\*' -or $apps[0].Version -ne $saved[0].Version -or
+                $apps[0].Location -ne $saved[0].Location -or (Get-TeXInventory) -ne $record.fingerprint) {
+                throw 'Installation nachtraeglich veraendert; Nachweis bleibt unveraendert.'
+            }
         }
         # A program installed between Initialize and Install is NOT ours.
-        if ($record.status -eq 'prepared' -and (@(Get-TeXRegistrations).Count -gt 0 -or (Test-Path -LiteralPath (Get-TeXInstallRoot)))) {
+        if ($record.status -eq 'prepared' -and ($apps.Count -gt 0 -or (Test-TeXFootprint))) {
             $record.baseline = 'present'
         }
+        $updater = $null
+        if ($apps.Count -gt 0) { $updater = Get-TeXUpdater $apps }
+        elseif (Test-TeXFootprint) { throw 'Vorhandene TeX-Installation nicht eindeutig zuzuordnen. Keine zweite Installation angelegt.' }
         $record.status = 'pending'
         Save-TeXRecord $dir $record
-        & $Command
-        # WinGet returns 0x8A15002B when the newest version is already present.
-        if ($LASTEXITCODE -ne 0 -and -not ($record.baseline -eq 'present' -and $LASTEXITCODE -eq -1978335189)) {
-            throw "MiKTeX-Installation nicht erfolgreich ($LASTEXITCODE). Keine automatische Entfernung."
+        if (-not $updater) {
+            & $Command
+            if ($LASTEXITCODE -ne 0) {
+                throw "MiKTeX-Installation nicht erfolgreich ($LASTEXITCODE). Keine automatische Entfernung."
+            }
+            $updater = Get-TeXUpdater @(Get-TeXRegistrations)
         }
+        # WinGet's MiKTeX manifest denies upgrades; use MiKTeX's own updater instead.
+        Update-TeX $updater
         $apps = @(Get-TeXRegistrations)
-        if ($apps.Count -eq 0) { throw 'MiKTeX-Installation konnte nicht bestaetigt werden.' }
+        if ($apps.Count -ne 1 -or $apps[0].Key -ne $updater.Key -or $apps[0].Location -ne $updater.Location) {
+            throw 'MiKTeX-Installation nach Aktualisierung nicht eindeutig. Nachweis bleibt erhalten.'
+        }
         if ($record.baseline -eq 'absent') {
             if ($apps.Count -ne 1 -or $apps[0].Key -notlike 'HKEY_CURRENT_USER\*') { throw 'Installation nicht eindeutig dem Benutzer zuzuordnen.' }
             $record.registration = $apps
@@ -146,7 +223,7 @@ function Install-TeX([scriptblock]$Command) {
         }
         $record.status = 'complete'
         Save-TeXRecord $dir $record
-        Write-Host 'Installation abgeschlossen. Lokales Protokoll gespeichert.'
+        Write-Host 'MiKTeX installiert/aktualisiert. Lokales Protokoll gespeichert.'
     }
 }
 function Invoke-TeXUninstall {

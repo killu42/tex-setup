@@ -17,12 +17,26 @@ function New-Fixture {
     $script:apps = @(); $script:fingerprint = 'unchanged'; $script:removals=0
     $script:failInstall=$false; $script:failRemove=$false
     $script:failBootstrap=$false; $script:bootstrapCalls=0
+    $script:installs=0; $script:updates=0; $script:failUpdate=$false
+    $script:failResolve=$false; $script:footprint=$false; $script:changeAfterUpdate=$false
 }
 function Get-TeXRecordPath { $script:dir }
 function Get-TeXUser { 'S-1-TEST' }
 function Get-TeXRegistrations { $script:apps }
 function Get-TeXInventory { $script:fingerprint }
 function Get-TeXInstallRoot { $script:installRoot }
+function Test-TeXFootprint { $script:footprint -or (Test-Path -LiteralPath $script:installRoot) }
+function Get-TeXUpdater($Apps) {
+    if ($script:failResolve -or @($Apps).Count -ne 1) { throw 'mock ambiguous updater' }
+    [pscustomobject]@{File='mock-miktex.exe';Admin=$false;Key=$Apps[0].Key;Location=$Apps[0].Location}
+}
+function Update-TeX($Updater) {
+    $script:updates++
+    if ($script:failUpdate) { throw 'mock update failure' }
+    $script:apps[0].Version = [string]([int]$script:apps[0].Version + 1)
+    $script:fingerprint = 'updated-' + $script:updates
+    if ($script:changeAfterUpdate) { $script:apps[0].Location='other-root' }
+}
 function Get-AppxPackage { @() }
 function Invoke-RestMethod {
     $script:bootstrapCalls++
@@ -30,6 +44,7 @@ function Invoke-RestMethod {
     '# bootstrap mocked: no network'
 }
 function winget {
+    $script:installs++
     $script:apps = @([pscustomobject]@{Key='HKEY_CURRENT_USER\Software\MiKTeX';Name='MiKTeX';Version='1';Location='mock-root'})
     $global:LASTEXITCODE = if ($script:failInstall) {9} else {0}
 }
@@ -50,13 +65,20 @@ Case 'missing log does nothing and creates nothing' {
 }
 Case 'new MiKTeX removed; record deleted' {
     Setup; $r=Read-TeXRecord $script:dir; Assert ($r.baseline -eq 'absent'); Assert ($r.status -eq 'complete')
+    Assert ($script:installs -eq 1); Assert ($script:updates -eq 1)
+    Assert ($r.registration[0].Version -eq '2'); Assert ($r.fingerprint -eq 'updated-1')
     Remove-TeX; Assert ($script:removals -eq 1); Assert (-not (Test-Path -LiteralPath $script:dir))
 }
 Case 'preexisting MiKTeX and updates preserved' {
-    winget; Setup; Remove-TeX; Assert ($script:removals -eq 0); Assert ($script:apps.Count -eq 1)
+    winget; Setup; Assert ($script:installs -eq 1); Assert ($script:updates -eq 1)
+    Assert ($script:apps[0].Version -eq '2')
+    Remove-TeX; Assert ($script:removals -eq 0); Assert ($script:apps.Count -eq 1)
 }
 Case 'repeat installation keeps original ownership' {
-    Setup; Setup; Assert ((Read-TeXRecord $script:dir).baseline -eq 'absent'); Remove-TeX; Assert ($script:removals -eq 1)
+    Setup; Setup; Assert ((Read-TeXRecord $script:dir).baseline -eq 'absent')
+    Assert ($script:installs -eq 1); Assert ($script:updates -eq 2)
+    Assert ((Read-TeXRecord $script:dir).registration[0].Version -eq '3')
+    Remove-TeX; Assert ($script:removals -eq 1)
 }
 Case 'program installed between prepare and install is preserved' {
     Initialize-TeX; winget; Install-TeX { winget install --id MiKTeX.MiKTeX -e --scope user -s winget }
@@ -73,7 +95,7 @@ Case 'changed files protected' {
     Assert ((Read-TeXRecord $script:dir).status -eq 'complete')
 }
 Case 'changed registration protected' {
-    Setup; $script:apps[0].Version='2'; Throws { Remove-TeX }; Assert ($script:removals -eq 0)
+    Setup; $script:apps[0].Version='99'; Throws { Remove-TeX }; Assert ($script:removals -eq 0)
 }
 Case 'other install scope protected' {
     Setup; $script:apps[0].Key='HKEY_LOCAL_MACHINE\Software\MiKTeX'; Throws { Remove-TeX }; Assert ($script:removals -eq 0)
@@ -127,5 +149,48 @@ Case 'bootstrap error blocks installation even with caller Continue preference' 
     Assert ($script:apps.Count -eq 0)
     Assert ((Read-TeXRecord $script:dir).status -eq 'prepared')
     Assert ($ErrorActionPreference -eq 'Continue')
+}
+Case 'failed update of existing program does not run installer or permit removal' {
+    winget; $script:failUpdate=$true; Throws { Setup }
+    Assert ($script:installs -eq 1); Assert ($script:updates -eq 1)
+    Assert ((Read-TeXRecord $script:dir).baseline -eq 'present')
+    Assert ((Read-TeXRecord $script:dir).status -eq 'pending')
+    Throws { Setup }; Throws { Remove-TeX }; Assert ($script:removals -eq 0)
+}
+Case 'failed update of new program retains pending record' {
+    $script:failUpdate=$true; Throws { Setup }
+    Assert ((Read-TeXRecord $script:dir).baseline -eq 'absent')
+    Assert ((Read-TeXRecord $script:dir).status -eq 'pending'); Throws { Remove-TeX }
+}
+Case 'unknown TeX footprint blocks a second distribution' {
+    $script:footprint=$true; Throws { Setup }
+    Assert ($script:installs -eq 0); Assert ($script:updates -eq 0)
+    Assert ((Read-TeXRecord $script:dir).status -eq 'prepared')
+}
+Case 'multiple registrations block installation and updates' {
+    winget; $script:apps += $script:apps[0]; Throws { Setup }
+    Assert ($script:installs -eq 1); Assert ($script:updates -eq 0)
+}
+Case 'unusable existing updater blocks a second installation before pending' {
+    winget; $script:failResolve=$true; Throws { Setup }
+    Assert ($script:installs -eq 1); Assert ($script:updates -eq 0)
+    Assert ((Read-TeXRecord $script:dir).status -eq 'prepared')
+}
+Case 'changed owned registration cannot be absorbed by updating' {
+    Setup; $script:apps[0].Version='99'; Throws { Setup }
+    Assert ($script:updates -eq 1); Assert ((Read-TeXRecord $script:dir).registration[0].Version -eq '2')
+}
+Case 'changed owned files cannot be absorbed by updating' {
+    Setup; $script:fingerprint='user-change'; Throws { Setup }
+    Assert ($script:updates -eq 1); Assert ((Read-TeXRecord $script:dir).fingerprint -eq 'updated-1')
+}
+Case 'registration changes during update cannot be claimed' {
+    $script:changeAfterUpdate=$true; Throws { Setup }
+    Assert ((Read-TeXRecord $script:dir).status -eq 'pending'); Throws { Remove-TeX }
+}
+Case 'repeat updates of existing program remain protected' {
+    winget; Setup; Setup; Assert ($script:installs -eq 1); Assert ($script:updates -eq 2)
+    Assert ((Read-TeXRecord $script:dir).baseline -eq 'present')
+    Remove-TeX; Assert ($script:removals -eq 0); Assert ($script:apps[0].Version -eq '3')
 }
 Write-Host "$script:count isolated PowerShell checks passed. No native Windows installation test."

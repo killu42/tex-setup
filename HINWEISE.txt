@@ -15,7 +15,26 @@ Die Wrapper akzeptieren nur diese konkreten Befehle. Vorbereitungsfehler
 stoppen die Installation. Die PowerShell-Fehlerbehandlung gilt nur innerhalb
 der Funktion und veraendert keine dauerhaften Benutzereinstellungen.
 Andere Distributionen werden nicht entfernt. Die PowerShell-Richtlinie bleibt
-unveraendert. Der MiKTeX-Befehl ist kein allgemeiner MiKTeX-Paketupdater.
+unveraendert.
+
+MiKTeX installieren oder aktualisieren
+-------------------------------------
+Der unveraenderte Install-TeX-Aufruf erkennt vorhandenes MiKTeX. Ist es bereits
+installiert, wird der WinGet-Installer uebersprungen: MiKTeX aktualisiert seine
+Paketdatenbank und installierten Pakete mit seinem eigenen miktex.exe-Updater.
+Auch eine neue Installation wird anschliessend aktualisiert. Eine abschliessende
+Updatepruefung und maximal drei Durchlaeufe beruecksichtigen Kernupdates.
+WinGet selbst erlaubt fuer MiKTeX keine Upgrades; deshalb erfolgt dieses Update
+im Wrapper, nicht durch den sichtbaren winget-install-Befehl allein.
+Der Updater wird ausschliesslich in der eindeutig registrierten Installation
+gesucht, auch bei einem benutzerdefinierten Installationsort. Mehrdeutige oder
+unvollstaendige Installationen werden nicht durch eine zweite ersetzt.
+Systemweit installiertes MiKTeX benoetigt eine als Administrator gestartete
+PowerShell; dann werden Systempakete und eigene Benutzerpakete aktualisiert.
+Bereits vorhandenes MiKTeX bleibt bei der Entfernung samt Updates erhalten.
+Bei selbst neu installiertem MiKTeX wird der Nachweis erst nach erfolgreichem
+Update erneuert. Spaeter ausserhalb dieses Aufrufs veraenderte Installationen
+werden nicht nachtraeglich uebernommen. Fehler bleiben als unvollstaendig markiert.
 
 Lokale Ablage und Datenschutz
 ----------------------------
@@ -77,6 +96,7 @@ Keine Garantie fuer jeden Rechner oder dauerhafte Wartungsfreiheit.
 node test-setup.mjs        : bestehende Bootstrap-Pruefungen
 node test-tracking.mjs     : Bash/zsh mit isolierten Paketmanager-/sudo-Mocks
 pwsh -NoProfile -File test-tracking.ps1 : PowerShell-Zustandsmaschine mit Mocks
+pwsh -NoProfile -File test-updates.ps1 : MiKTeX-Erkennung und Updatefolge mit Mocks
 node test-entrypoints.mjs  : Linux-Einstieg und PDF-Befehle mit Download-Mocks
 pwsh -NoProfile -File test-entrypoints.ps1 : kurzer Windows-Einstieg mit Mocks
 Keine echten Installationen oder Deinstallationen durch diese Tests.
@@ -90,6 +110,9 @@ https://www.tug.org/mactex/uninstalling.html
 https://learn.microsoft.com/en-us/windows/package-manager/winget/
 https://learn.microsoft.com/en-us/windows/package-manager/winget/uninstall
 https://miktex.org/faq
+https://docs.miktex.org/manual/miktex.html
+https://docs.miktex.org/manual/miktex-packages.html
+https://github.com/microsoft/winget-pkgs/blob/master/manifests/m/MiKTeX/MiKTeX/25.12/MiKTeX.MiKTeX.installer.yaml
 https://manpages.debian.org/bookworm/apt/apt-get.8.en.html
 https://manpages.debian.org/bookworm/dpkg/dpkg.1.en.html
 
