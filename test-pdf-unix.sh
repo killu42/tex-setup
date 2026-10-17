@@ -13,6 +13,7 @@ printf '\\documentclass{article}\\begin{document}Test.\\end{document}\n' > "$tex
 tex_doc_hash=$(shasum -a 256 "$tex_work/keep.tex")
 tex_git=$(command -v git)
 tex_git_hash=$(shasum -a 256 "$tex_git")
+if [ "$TEST_PLATFORM" = mac ]; then brew list --formula > "$tex_work/formulae-before"; fi
 if [ "$(uname -s)" = Darwin ]; then
   [ ! -x /Library/TeX/texbin/pdflatex ]
   if [ "$TEST_PLATFORM" = intel ]; then [ "$(uname -m)" = x86_64 ]; fi
@@ -67,4 +68,12 @@ printf 'Repeat removal exit: %s\n' "$tex_repeat_status"
 test -s "$tex_work/keep.pdf"
 [ "$(shasum -a 256 "$tex_work/keep.tex")" = "$tex_doc_hash" ]
 [ "$(shasum -a 256 "$tex_git")" = "$tex_git_hash" ]
+if [ "$TEST_PLATFORM" = mac ]; then
+  brew list --formula > "$tex_work/formulae-after"
+  while IFS= read -r tex_formula; do
+    grep -Fxq "$tex_formula" "$tex_work/formulae-after" ||
+      { printf 'FAIL pre-existing formula removed: %s\n' "$tex_formula"; exit 1; }
+  done < "$tex_work/formulae-before"
+  printf 'PASS all pre-existing Homebrew formulae retained\n'
+fi
 printf 'PASS own document and unrelated program unchanged\n'
