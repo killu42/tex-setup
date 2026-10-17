@@ -252,7 +252,73 @@ function Update-TeX($Updater) {
         if (-not $finished) { throw 'MiKTeX meldet weiterhin offene Updates. Aktualisierung nicht als abgeschlossen vermerkt.' }
     }
 }
-function Get-TeXInventory {
+function Get-TeXProgramsFolders {
+    @([Environment]::GetFolderPath('Programs'), [Environment]::GetFolderPath('CommonPrograms'))
+}
+function Get-TeXShortcut([string]$Path) {
+    Assert-TeXPlainPath $Path
+    $shell = New-Object -ComObject WScript.Shell
+    $shell.CreateShortcut($Path)
+}
+function Find-TeXEditorShortcut([string]$Editor) {
+    foreach ($folder in @(Get-TeXProgramsFolders)) {
+        if ([string]::IsNullOrWhiteSpace($folder)) { continue }
+        if (-not (Test-Path -LiteralPath $folder -PathType Container)) { continue }
+        foreach ($file in @(Get-ChildItem -LiteralPath $folder -Filter '*TeXworks*.lnk' -Recurse -ErrorAction Stop)) {
+            $link = Get-TeXShortcut $file.FullName
+            if ($link.TargetPath -eq $Editor -and [string]::IsNullOrWhiteSpace($link.Arguments)) { return $file.FullName }
+        }
+    }
+}
+function Ensure-TeXEditor($Updater, $Record) {
+    $bin = Split-Path -Parent $Updater.File
+    $editor = Join-Path $bin 'miktex-texworks.exe'
+    if (-not (Test-Path -LiteralPath $editor -PathType Leaf)) {
+        $prefix = @()
+        if ($Updater.Admin) { $prefix = @('--admin') }
+        $package = if ((Split-Path -Leaf $bin) -eq 'x64') { 'miktex-texworks-bin-x64-2.9' } else { 'miktex-texworks-bin-2.9' }
+        if ((Invoke-TeXNative $Updater.File ($prefix + @('packages','install',$package))) -ne 0) {
+            throw 'TeXworks konnte nicht nachinstalliert werden.'
+        }
+    }
+    if (-not (Test-Path -LiteralPath $editor -PathType Leaf)) { throw 'TeXworks fehlt nach der Installation.' }
+    Assert-TeXPlainPath $editor
+    if (Find-TeXEditorShortcut $editor) { return }
+    # Only add a missing per-user shortcut; never overwrite another editor/link.
+    $programs = @(Get-TeXProgramsFolders)[0]
+    if (-not [IO.Path]::IsPathRooted($programs)) { throw 'Startmenue-Ordner nicht verfuegbar.' }
+    Assert-TeXPlainPath $programs
+    [void][IO.Directory]::CreateDirectory($programs)
+    $path = $null
+    foreach ($name in @('TeXworks.lnk','TeXworks (MiKTeX).lnk')) {
+        $candidate = Join-Path $programs $name
+        if (-not (Test-Path -LiteralPath $candidate)) { $path = $candidate; break }
+    }
+    if (-not $path) { throw 'Vorhandene Startmenue-Verknuepfungen bleiben unveraendert.' }
+    $link = Get-TeXShortcut $path
+    $link.TargetPath = $editor
+    $link.WorkingDirectory = [Environment]::GetFolderPath('MyDocuments')
+    $link.Description = 'TeXworks - LaTeX-Editor (MiKTeX)'
+    $link.Save()
+    if ((Get-TeXShortcut $path).TargetPath -ne $editor) { throw 'TeXworks-Verknuepfung konnte nicht angelegt werden.' }
+    $links = @($Record.editorLinks | Where-Object { $_ })
+    $links += [pscustomobject]@{Path=$path; Hash=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash}
+    $Record | Add-Member -NotePropertyName editorLinks -NotePropertyValue $links -Force
+}
+function Remove-TeXEditorLinks($Record) {
+    # Called only after a newly installed MiKTeX has actually been removed.
+    $programs = @(Get-TeXProgramsFolders)[0]
+    foreach ($link in @($Record.editorLinks | Where-Object { $_ })) {
+        if ((Split-Path -Parent $link.Path) -ne $programs -or
+            (Split-Path -Leaf $link.Path) -notin @('TeXworks.lnk','TeXworks (MiKTeX).lnk')) { continue }
+        Assert-TeXPlainPath $link.Path
+        if ((Test-Path -LiteralPath $link.Path -PathType Leaf) -and
+            (Get-FileHash -LiteralPath $link.Path -Algorithm SHA256).Hash -eq $link.Hash) {
+            Remove-Item -LiteralPath $link.Path -Force -ErrorAction Stop
+        }
+    }
+}
+function Get-TeXInventory([switch]$Stable) {
     $root = Get-TeXInstallRoot
     Assert-TeXPlainPath $root
     if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw 'MiKTeX-Programmordner fehlt.' }
@@ -260,11 +326,36 @@ function Get-TeXInventory {
     # AppData settings/cache directories are deleted by our code.
     $rows = @(Get-ChildItem -LiteralPath $root -Recurse -Force -ErrorAction Stop | ForEach-Object {
         if ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Link im Programmordner; keine automatische Entfernung.' }
-        '{0}|{1}|{2}' -f $_.FullName.Substring($root.Length), $_.Length, $_.LastWriteTimeUtc.Ticks
+        $relative = $_.FullName.Substring($root.Length)
+        if ($Stable -and $_.PSIsContainer) {
+            # Directory timestamps change when MiKTeX touches its runtime lock.
+            # Names/types still detect added directories; every file is checked.
+            '{0}|directory' -f $relative
+        } elseif ($Stable -and $relative.Replace('/','\') -ieq '\miktex\lock') {
+            # MiKTeX rewrites this one-byte lock during ordinary compiler use.
+            '{0}|{1}|runtime-lock' -f $relative, $_.Length
+        } else {
+            '{0}|{1}|{2}' -f $relative, $_.Length, $_.LastWriteTimeUtc.Ticks
+        }
     } | Sort-Object)
     $sha = [Security.Cryptography.SHA256]::Create()
     try { ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes(($rows -join "`n"))))).Replace('-','') }
     finally { $sha.Dispose() }
+}
+function Test-TeXOwnedRegistration($Record, $Apps) {
+    $saved = @($Record.registration)
+    $current = @($Apps)
+    if ($saved.Count -ne 1 -or $current.Count -ne 1 -or $current[0].Key -notlike 'HKEY_CURRENT_USER\*') { return $false }
+    foreach ($field in @('Key','Name','Version','Location')) {
+        # Registry values can be null; JSON reload and live registry must agree
+        # semantically, not differ merely because an absent value became ''.
+        if ([string]$current[0].$field -cne [string]$saved[0].$field) { return $false }
+    }
+    $true
+}
+function Test-TeXOwnedInventory($Record) {
+    if ($Record.inventoryVersion -and $Record.inventoryVersion -ne 2) { throw 'Unbekannte Inventarversion. Nichts entfernt.' }
+    (Get-TeXInventory -Stable:($Record.inventoryVersion -eq 2)) -eq $Record.fingerprint
 }
 function Initialize-TeX {
     Use-TeXRecord {
@@ -302,11 +393,15 @@ function Install-TeX([scriptblock]$Command) {
         if (-not $record -or $record.status -eq 'pending') { throw 'Kein gueltiger Installationsbeginn.' }
         $apps = @(Get-TeXRegistrations)
         if ($record.status -eq 'complete' -and $record.baseline -eq 'absent') {
-            $saved = @($record.registration)
-            if ($saved.Count -ne 1 -or $apps.Count -ne 1 -or $apps[0].Key -ne $saved[0].Key -or
-                $apps[0].Key -notlike 'HKEY_CURRENT_USER\*' -or $apps[0].Version -ne $saved[0].Version -or
-                $apps[0].Location -ne $saved[0].Location -or (Get-TeXInventory) -ne $record.fingerprint) {
+            if (-not (Test-TeXOwnedRegistration $record $apps)) {
                 throw 'Installation nachtraeglich veraendert; Nachweis bleibt unveraendert.'
+            }
+            if (-not (Test-TeXOwnedInventory $record)) {
+                if ($record.inventoryVersion -eq 2) { throw 'Installation nachtraeglich veraendert; Nachweis bleibt unveraendert.' }
+                # An old aggregate hash cannot explain a changed lock timestamp.
+                # Repair/update is safe, but never adopt unproven files for deletion.
+                $record.baseline = 'present'
+                Write-Host 'Aeltere Installation wird repariert; ihre automatische Entfernung bleibt aus Sicherheitsgruenden gesperrt.'
             }
         }
         # A program installed between Initialize and Install is NOT ours.
@@ -327,6 +422,7 @@ function Install-TeX([scriptblock]$Command) {
         }
         # WinGet's MiKTeX manifest denies upgrades; use MiKTeX's own updater instead.
         Update-TeX $updater
+        Ensure-TeXEditor $updater $record
         $apps = @(Get-TeXRegistrations)
         if ($apps.Count -ne 1 -or $apps[0].Key -ne $updater.Key -or $apps[0].Location -ne $updater.Location) {
             throw 'MiKTeX-Installation nach Aktualisierung nicht eindeutig. Nachweis bleibt erhalten.'
@@ -334,7 +430,8 @@ function Install-TeX([scriptblock]$Command) {
         if ($record.baseline -eq 'absent') {
             if ($apps.Count -ne 1 -or $apps[0].Key -notlike 'HKEY_CURRENT_USER\*') { throw 'Installation nicht eindeutig dem Benutzer zuzuordnen.' }
             $record.registration = $apps
-            $record.fingerprint = Get-TeXInventory
+            $record | Add-Member -NotePropertyName inventoryVersion -NotePropertyValue 2 -Force
+            $record.fingerprint = Get-TeXInventory -Stable
         }
         $record.status = 'complete'
         Save-TeXRecord $dir $record
@@ -356,10 +453,7 @@ function Remove-TeX {
         } else {
             $apps = @(Get-TeXRegistrations)
             if ($apps.Count -gt 0) {
-                $saved = @($record.registration)
-                if ($saved.Count -ne 1 -or $apps.Count -ne 1 -or $apps[0].Key -ne $saved[0].Key -or
-                    $apps[0].Key -notlike 'HKEY_CURRENT_USER\*' -or $apps[0].Version -ne $saved[0].Version -or
-                    $apps[0].Location -ne $saved[0].Location -or (Get-TeXInventory) -ne $record.fingerprint) {
+                if (-not (Test-TeXOwnedRegistration $record $apps) -or -not (Test-TeXOwnedInventory $record)) {
                     throw 'MiKTeX wurde nachtraeglich veraendert. Nichts entfernt; Protokoll bleibt erhalten.'
                 }
                 Invoke-TeXUninstall
@@ -367,6 +461,7 @@ function Remove-TeX {
             } elseif (Test-Path -LiteralPath (Get-TeXInstallRoot)) {
                 throw 'MiKTeX-Nachweis fehlt, aber der Programmordner existiert noch. Protokoll bleibt erhalten.'
             }
+            Remove-TeXEditorLinks $record
         }
         Remove-Item -LiteralPath (Join-Path $dir 'state.json') -Force
         Write-Host 'Entfernung abgeschlossen; lokales Protokoll geloescht.'

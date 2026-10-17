@@ -1,11 +1,12 @@
 # REAL installation/removal test. Run only on a disposable GitHub-hosted VM.
-param([ValidateSet('fresh','existing','manager-new')][string]$Scenario = 'fresh')
+param([ValidateSet('fresh','existing','legacy','manager-new')][string]$Scenario = 'fresh')
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT' -or $env:GITHUB_ACTIONS -ne 'true' -or
     $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:GITHUB_REPOSITORY -ne 'killu42/tex-setup') {
     throw 'This native test is restricted to disposable GitHub-hosted Windows VMs.'
 }
-$testedRef = '4b150e1bdc045cb8aeabdfc646abf63f409eb389'
+$testedRef = $env:TEST_REF
+if ($testedRef -notmatch '^[a-f0-9]{40}$') { throw 'An explicit tested commit is required.' }
 $base = "https://raw.githubusercontent.com/killu42/tex-setup/$testedRef"
 $testDir = Join-Path $env:RUNNER_TEMP ('tex-native-' + [guid]::NewGuid())
 [void][IO.Directory]::CreateDirectory($testDir)
@@ -57,6 +58,24 @@ function Check-TeXExecutable {
     Check ($versionExit -eq 0) "Real pdfLaTeX starts (exit $versionExit)"
     $compiler
 }
+function Check-EditorLaunch {
+    $editor = Join-Path (Split-Path -Parent (Get-TeXUpdater @(Get-TeXRegistrations)).File) 'miktex-texworks.exe'
+    $shortcut = Find-TeXEditorShortcut $editor
+    Check ([bool]$shortcut) 'Start menu contains a shortcut to this TeXworks'
+    $process = Start-Process -FilePath $editor -PassThru
+    try {
+        [void]$process.WaitForInputIdle(15000)
+        Start-Sleep -Seconds 3
+        $process.Refresh()
+        Check (-not $process.HasExited -and $process.MainWindowHandle -ne 0) 'Real TeXworks opens a GUI window'
+    } finally {
+        $process.Refresh()
+        if (-not $process.HasExited) {
+            [void]$process.CloseMainWindow()
+            if (-not $process.WaitForExit(10000)) { Stop-Process -Id $process.Id -Force }
+        }
+    }
+}
 $script:failed = $false
 try {
     $os = Get-CimInstance Win32_OperatingSystem
@@ -64,12 +83,6 @@ try {
     Write-Host "Scenario: $Scenario; tested script commit: $testedRef; PowerShell $($PSVersionTable.PSVersion)"
     $tracker = Invoke-RestMethod "$base/track.ps1"
     Invoke-Expression $tracker
-    $script:originalInventory = (Get-Item Function:Get-TeXInventory).ScriptBlock
-    $script:lastSavedRows = @()
-    function Get-TeXInventory {
-        $script:lastSavedRows = @(Get-InventoryRows)
-        & $script:originalInventory
-    }
     Check (-not (Test-Path -LiteralPath (Get-TeXRecordPath))) 'Fresh VM has no TeX ownership record'
     Check (-not (Test-Path -LiteralPath (Get-TeXManagerPath))) 'Fresh VM has no manager ownership record'
     Check (@(Get-TeXRegistrations).Count -eq 0 -and -not (Test-TeXFootprint)) 'Disposable VM starts without MiKTeX'
@@ -112,6 +125,13 @@ try {
         Check ($LASTEXITCODE -eq 0) 'Independent fixture installation succeeds'
         Check (@(Get-TeXRegistrations).Count -eq 1) 'Preexisting fixture registered by real installer'
     }
+    if ($Scenario -eq 'legacy') {
+        Stage 'Real tracked installation from the old PDF implementation'
+        Invoke-Expression (Invoke-RestMethod 'https://raw.githubusercontent.com/killu42/tex-setup/4b150e1bdc045cb8aeabdfc646abf63f409eb389/track.ps1')
+        Install-TeX { winget install --id MiKTeX.MiKTeX -e --scope user -s winget }
+        [void](Check-TeXExecutable)
+        Invoke-Expression $tracker
+    }
     $managerBefore = @(Get-TeXManagerPackages)
     $managerWasPresent = $managerBefore.Count -gt 0 -or (Test-TeXManagerCommand)
     Write-Host "WinGet/App Installer already present before tracked setup: $managerWasPresent"
@@ -121,9 +141,7 @@ try {
     Write-Host ('Saved registration: ' + ($record.registration | ConvertTo-Json -Compress))
     Write-Host ('Current registration: ' + (@(Get-TeXRegistrations) | ConvertTo-Json -Compress))
     Write-Host "Saved fingerprint: $($record.fingerprint)"
-    Write-Host "Current fingerprint: $(& $script:originalInventory)"
-    Write-Host 'Changes since saved inventory:'
-    if ($script:lastSavedRows.Count) { Compare-Object $script:lastSavedRows @(Get-InventoryRows) | Format-Table -AutoSize | Out-Host }
+    Write-Host "Current fingerprint: $(Get-TeXInventory -Stable:($record.inventoryVersion -eq 2))"
     $shell = New-Object -ComObject WScript.Shell
     foreach ($programs in @([Environment]::GetFolderPath('Programs'), [Environment]::GetFolderPath('CommonPrograms'))) {
         Get-ChildItem -LiteralPath $programs -Filter '*TeX*.lnk' -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
@@ -131,7 +149,11 @@ try {
         }
     }
     Check ($record.status -eq 'complete') 'Native installation and update complete'
-    Check ($record.baseline -eq $(if ($Scenario -eq 'existing') {'present'} else {'absent'})) 'MiKTeX provenance matches real initial state'
+    if ($Scenario -eq 'legacy') {
+        Check ($record.baseline -in @('present','absent')) 'Old setup repaired without assuming unverifiable ownership'
+    } else {
+        Check ($record.baseline -eq $(if ($Scenario -eq 'existing') {'present'} else {'absent'})) 'MiKTeX provenance matches real initial state'
+    }
     $managerRecord = Read-TeXManagerRecord (Get-TeXManagerPath)
     Check ($managerRecord.status -eq 'complete') 'Native manager bootstrap complete'
     Check ($managerRecord.baseline -eq $(if ($managerWasPresent) {'present'} else {'absent'})) 'WinGet provenance matches real initial state'
@@ -141,21 +163,28 @@ try {
     $inventoryDiff = @(Compare-Object $inventoryBefore $inventoryAfter)
     Write-Host "Inventory differences after pdfLaTeX --version: $($inventoryDiff.Count)"
     $inventoryDiff | Select-Object -First 30 | Format-Table -AutoSize | Out-Host
-    Part 'Repeat the unchanged installation command' {
-        Write-Host "Fingerprint before repeat: $(& $script:originalInventory)"
-        if ($script:lastSavedRows.Count) { Compare-Object $script:lastSavedRows @(Get-InventoryRows) | Format-Table -AutoSize | Out-Host }
+    Part 'Repair a missing shortcut on repeated setup' {
+        $editor = Join-Path (Split-Path -Parent (Get-TeXUpdater @(Get-TeXRegistrations)).File) 'miktex-texworks.exe'
+        $shortcut = Find-TeXEditorShortcut $editor
+        Check ([bool]$shortcut) 'First setup created a valid Start menu entry'
+        Remove-Item -LiteralPath $shortcut -Force
         Install-TeX { winget install --id MiKTeX.MiKTeX -e --scope user -s winget }
-        Check ((Read-TeXRecord (Get-TeXRecordPath)).baseline -eq $record.baseline) 'Repeat update preserves original ownership'
+        Check-EditorLaunch
     }
     Part 'Compile a real minimal document' {
         & $compiler --disable-installer --interaction=nonstopmode --halt-on-error "--output-directory=$testDir" $document | Out-Host
         Check ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath (Join-Path $testDir 'keep.pdf'))) 'Real document compiles to PDF'
     }
+    Part 'Repeat the unchanged installation command' {
+        Install-TeX { winget install --id MiKTeX.MiKTeX -e --scope user -s winget }
+        Check ((Read-TeXRecord (Get-TeXRecordPath)).baseline -eq $record.baseline) 'Repeat update preserves original ownership'
+    }
     Part 'Native TeX removal' {
     Remove-TeX
-    if ($Scenario -eq 'fresh') {
+    if ($record.baseline -eq 'absent') {
         Check (@(Get-TeXRegistrations).Count -eq 0) 'New MiKTeX registration removed'
         Check (-not (Test-Path -LiteralPath $compiler)) 'New MiKTeX compiler removed'
+        Check (-not (Find-TeXEditorShortcut $editor)) 'Owned TeXworks shortcut removed'
     } else {
         Check (@(Get-TeXRegistrations).Count -eq 1) 'Preexisting MiKTeX remains registered'
         [void](Check-TeXExecutable)
@@ -186,7 +215,7 @@ try {
     if ($env:GITHUB_STEP_SUMMARY) {
         @("## Native Windows test: $Scenario", "Tested script commit: $testedRef", '',
           ($script:checks | ForEach-Object { '- ' + $_ }), '',
-          'Real programs and registry, no mocks. GUI interactions and all possible private-PC configurations are not covered.') |
+          'Real programs, Start menu links, GUI startup and registry, no mocks. Interactive editing and every private-PC configuration are not covered.') |
             Out-File -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
     }
 }
