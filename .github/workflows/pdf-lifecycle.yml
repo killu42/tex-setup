@@ -1,0 +1,49 @@
+name: Exact PDF lifecycle
+on:
+  workflow_dispatch:
+permissions: {}
+jobs:
+  windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, windows-11-arm]
+        scenario: [fresh, legacy]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - name: Exact PDF install, repeat, editor, PDF, removal and preservation
+        shell: powershell
+        env:
+          TEST_REF: ${{ github.sha }}
+          SCENARIO: ${{ matrix.scenario }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $test=Invoke-RestMethod "https://raw.githubusercontent.com/killu42/tex-setup/$env:TEST_REF/test-pdf-windows.ps1"
+          & ([scriptblock]::Create($test)) -Scenario $env:SCENARIO
+  unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+          - os: macos-15
+            platform: mac
+          - os: macos-15-intel
+            platform: intel
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - name: Exact PDF install, repeat, editor, PDF, removal and preservation
+        shell: bash
+        env:
+          TEST_REF: ${{ github.sha }}
+          TEST_PLATFORM: ${{ matrix.platform }}
+          NONINTERACTIVE: '1'
+          HOMEBREW_NO_ANALYTICS: '1'
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          test_script=$(curl -fsSL --retry 3 "https://raw.githubusercontent.com/killu42/tex-setup/$TEST_REF/test-pdf-unix.sh")
+          bash -c "$test_script"
