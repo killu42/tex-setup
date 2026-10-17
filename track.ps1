@@ -24,7 +24,7 @@ function Read-TeXRecord([string]$Dir) {
     }
     $record = Get-Content -LiteralPath $file -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
     if ($record.schema -ne 1 -or $record.user -ne (Get-TeXUser) -or
-        $record.baseline -notin @('present','absent') -or $record.status -notin @('prepared','pending','complete')) {
+        $record.baseline -notin @('present','absent') -or $record.status -notin @('prepared','pending','retryable','complete')) {
         throw 'Ungueltiges Installationsprotokoll. Nichts entfernt.'
     }
     $record
@@ -235,6 +235,15 @@ function Invoke-TeXNative([string]$File, [string[]]$Arguments) {
     & $File @Arguments | Out-Host
     $LASTEXITCODE
 }
+function Invoke-TeXPackageCommand([string]$File, [string[]]$Arguments, [int[]]$SuccessCodes = @(0)) {
+    # Only idempotent package operations use this retry, never install/uninstall.
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $code = Invoke-TeXNative $File $Arguments
+        if ($null -eq $code -or $code -in $SuccessCodes -or $attempt -eq 3) { return $code }
+        Write-Host 'MiKTeX-Paketserver/Update nicht erreichbar; erneuter Versuch ...'
+        Start-Sleep -Seconds 3
+    }
+}
 function Update-TeX($Updater) {
     # Shared packages need --admin; also update this user's own packages.
     $modes = @($false)
@@ -246,10 +255,10 @@ function Update-TeX($Updater) {
         # A core update can require another invocation of the newly updated utility.
         for ($pass = 0; $pass -lt 3; $pass++) {
             foreach ($command in @('update-package-database', 'update')) {
-                $code = Invoke-TeXNative $Updater.File ($prefix + @('packages', $command))
+                $code = Invoke-TeXPackageCommand $Updater.File ($prefix + @('packages', $command))
                 if ($null -eq $code -or $code -ne 0) { throw "MiKTeX-Aktualisierung fehlgeschlagen ($command, $code)." }
             }
-            $code = Invoke-TeXNative $Updater.File ($prefix + @('packages', 'check-update'))
+            $code = Invoke-TeXPackageCommand $Updater.File ($prefix + @('packages', 'check-update')) @(0,100)
             if ($null -ne $code -and $code -eq 0) { $finished = $true; break }
             if ($null -eq $code -or $code -ne 100) { throw "MiKTeX-Updatepruefung fehlgeschlagen ($code)." }
         }
@@ -281,7 +290,7 @@ function Ensure-TeXEditor($Updater, $Record) {
         $prefix = @()
         if ($Updater.Admin) { $prefix = @('--admin') }
         $package = if ((Split-Path -Leaf $bin) -eq 'x64') { 'miktex-texworks-bin-x64-2.9' } else { 'miktex-texworks-bin-2.9' }
-        if ((Invoke-TeXNative $Updater.File ($prefix + @('packages','install',$package))) -ne 0) {
+        if ((Invoke-TeXPackageCommand $Updater.File ($prefix + @('packages','install',$package))) -ne 0) {
             throw 'TeXworks konnte nicht nachinstalliert werden.'
         }
     }
@@ -369,6 +378,20 @@ function Get-TeXSetupAssessment($Record) {
         throw 'Vorherige Installation unvollstaendig. Keine automatische Uebernahme oder Entfernung.'
     }
     if ($apps.Count -gt 1) { throw 'Mehrere MiKTeX-Installationen gefunden. Keine automatische Uebernahme.' }
+    if ($Record -and $Record.status -eq 'retryable') {
+        # Only a checkpoint written after a handled update/editor failure can
+        # resume. Old pending records and interrupted installers stay protected.
+        if (@($Record.registration).Count -ne 1 -or $apps.Count -ne 1) { throw 'Wiederaufnahme nicht eindeutig.' }
+        foreach ($field in @('Key','Name','Version','Location')) {
+            if ([string]$Record.registration[0].$field -cne [string]$apps[0].$field) { throw 'Installation seit dem Abbruch veraendert.' }
+        }
+        if ($Record.baseline -eq 'absent' -and
+            (-not $Record.cleanupRootsFresh -or $Record.inventoryVersion -ne 2 -or
+             -not (Test-TeXOwnedRegistration $Record $apps) -or -not (Test-TeXOwnedInventory $Record))) {
+            throw 'Dateien seit dem Abbruch veraendert. Keine automatische Uebernahme.'
+        }
+        return [pscustomobject]@{Kind='retryable'; Message='Gesicherter Update-Abbruch erkannt. Aktualisierung wird erneut versucht; vorher vorhandene Programme bleiben geschuetzt.'}
+    }
     if ($Record -and $Record.status -eq 'complete' -and $Record.baseline -eq 'absent') {
         if (-not (Test-TeXOwnedRegistration $Record $apps)) {
             throw 'Installation passt nicht zum gespeicherten Nachweis. Keine automatische Uebernahme.'
@@ -429,6 +452,7 @@ function Install-TeX([scriptblock]$Command) {
         param($dir)
         $record = Read-TeXRecord $dir
         if (-not $record -or $record.status -eq 'pending') { throw 'Kein gueltiger Installationsbeginn.' }
+        if ($record.status -eq 'retryable') { [void](Get-TeXSetupAssessment $record) }
         $apps = @(Get-TeXRegistrations)
         if ($record.status -eq 'complete' -and $record.baseline -eq 'absent') {
             if (-not $record.cleanupRootsFresh) {
@@ -467,8 +491,29 @@ function Install-TeX([scriptblock]$Command) {
             $updater = Get-TeXUpdater @(Get-TeXRegistrations)
         }
         # WinGet's MiKTeX manifest denies upgrades; use MiKTeX's own updater instead.
-        Update-TeX $updater
-        Ensure-TeXEditor $updater $record
+        try {
+            Update-TeX $updater
+            Ensure-TeXEditor $updater $record
+        } catch {
+            $updateFailure = $_
+            # Capture only this completed installer/update transaction. Never
+            # recover unknown pending state or grant ownership to old installs.
+            $observed = @(Get-TeXRegistrations)
+            if ($observed.Count -eq 1 -and $observed[0].Key -eq $updater.Key -and
+                $observed[0].Location -eq $updater.Location) {
+                if ($record.baseline -eq 'present' -or $record.cleanupRootsFresh) {
+                    $record.registration = $observed
+                    if ($record.baseline -eq 'absent') {
+                        $record | Add-Member -NotePropertyName inventoryVersion -NotePropertyValue 2 -Force
+                        $record.fingerprint = Get-TeXInventory -Stable
+                    }
+                    $record.status = 'retryable'
+                    Save-TeXRecord $dir $record
+                    Write-Host 'Update nicht abgeschlossen. Derselbe Installationsblock kann erneut ausgefuehrt werden.'
+                }
+            }
+            throw $updateFailure
+        }
         $apps = @(Get-TeXRegistrations)
         if ($apps.Count -ne 1 -or $apps[0].Key -ne $updater.Key -or $apps[0].Location -ne $updater.Location) {
             throw 'MiKTeX-Installation nach Aktualisierung nicht eindeutig. Nachweis bleibt erhalten.'

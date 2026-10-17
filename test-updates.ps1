@@ -9,6 +9,7 @@ $script:count = 0
 function Assert($Condition, $Message='Assertion failed') { if (-not $Condition) { throw $Message } }
 function Throws([scriptblock]$Action) { $caught=$false; try { & $Action } catch { $caught=$true }; Assert $caught 'Expected rejection' }
 function Test-TeXAdministrator { $script:admin }
+function Start-Sleep { } # Retry delay only; never wait in isolated tests.
 function Get-TeXRegistrations { $script:app }
 function Get-TeXInstallRoot { $script:installRoot }
 function Get-TeXDataRoots { (Join-Path $script:installRoot 'config'); (Join-Path $script:installRoot 'data') }
@@ -96,13 +97,18 @@ Case 'persistent remaining updates fail after three passes' {
     Throws { Update-TeX (Get-TeXUpdater @($script:app)) }; Assert ($script:calls.Count -eq 9)
 }
 Case 'database failure stops before package update' {
-    Codes @(9); Throws { Update-TeX (Get-TeXUpdater @($script:app)) }; Assert ($script:calls.Count -eq 1)
+    Codes @(9,9,9); Throws { Update-TeX (Get-TeXUpdater @($script:app)) }; Assert ($script:calls.Count -eq 3)
 }
 Case 'package update failure is not success' {
-    Codes @(0,9); Throws { Update-TeX (Get-TeXUpdater @($script:app)) }; Assert ($script:calls.Count -eq 2)
+    Codes @(0,9,9,9); Throws { Update-TeX (Get-TeXUpdater @($script:app)) }; Assert ($script:calls.Count -eq 4)
 }
 Case 'verification failure is not treated as available updates' {
-    Codes @(0,0,9); Throws { Update-TeX (Get-TeXUpdater @($script:app)) }; Assert ($script:calls.Count -eq 3)
+    Codes @(0,0,9,9,9); Throws { Update-TeX (Get-TeXUpdater @($script:app)) }; Assert ($script:calls.Count -eq 5)
+}
+Case 'temporary database failure retries the same command then succeeds' {
+    Codes @(9,0,0,0); Update-TeX (Get-TeXUpdater @($script:app))
+    Assert ($script:calls.Count -eq 4)
+    Assert (($script:calls[0].Arguments -join ' ') -eq ($script:calls[1].Arguments -join ' '))
 }
 Case 'missing exit code fails closed' {
     $script:codes.Enqueue($null); Throws { Update-TeX (Get-TeXUpdater @($script:app)) }

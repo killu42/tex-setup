@@ -105,6 +105,7 @@ try {
     Write-Host "OS: $($os.Caption); build $($os.BuildNumber); architecture $env:PROCESSOR_ARCHITECTURE"
     Write-Host "Scenario: $Scenario; tested script commit: $testedRef; PowerShell $($PSVersionTable.PSVersion)"
     $tracker = Invoke-RestMethod "$base/track.ps1"
+    $tracker = $tracker.Replace('https://raw.githubusercontent.com/killu42/tex-setup/main/', "$base/")
     Invoke-Expression $tracker
     Check (-not (Test-Path -LiteralPath (Get-TeXRecordPath))) 'Fresh VM has no TeX ownership record'
     Check (-not (Test-Path -LiteralPath (Get-TeXManagerPath))) 'Fresh VM has no manager ownership record'
