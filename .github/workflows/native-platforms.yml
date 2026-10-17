@@ -8,9 +8,14 @@ on:
       - '.github/workflows/native-platforms.yml'
   workflow_dispatch:
   workflow_call:
+    inputs:
+      managers_only:
+        type: boolean
+        default: false
 permissions: {}
 jobs:
   unix:
+    if: ${{ !inputs.managers_only }}
     name: ${{ matrix.os }} - ${{ matrix.scenario }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
@@ -37,6 +42,7 @@ jobs:
           script=$(curl -fsSL --retry 3 "https://raw.githubusercontent.com/killu42/tex-setup/$TEST_REF/test-unix-native.sh")
           bash -c "$script"
   windows:
+    if: ${{ !inputs.managers_only }}
     name: ${{ matrix.os }} - ${{ matrix.scenario }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
@@ -59,3 +65,24 @@ jobs:
           $source = Invoke-RestMethod "https://raw.githubusercontent.com/killu42/tex-setup/$env:TEST_REF/test-windows-native.ps1"
           if ([string]::IsNullOrWhiteSpace($source)) { throw 'Empty test download' }
           & ([scriptblock]::Create($source)) -Scenario $env:TEST_SCENARIO
+  mac-manager:
+    name: ${{ matrix.os }} - missing Homebrew
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel]
+    steps:
+      - name: Install, repeat and remove previously absent Homebrew
+        shell: bash
+        env:
+          TEST_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_ANALYTICS: '1'
+          HOMEBREW_NO_ENV_HINTS: '1'
+          NONINTERACTIVE: '1'
+        run: |
+          set -euo pipefail
+          script=$(curl -fsSL --retry 3 "https://raw.githubusercontent.com/killu42/tex-setup/$TEST_REF/test-mac-manager-native.sh")
+          bash -c "$script"

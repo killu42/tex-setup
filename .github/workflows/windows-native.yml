@@ -1,7 +1,14 @@
 name: Plattform-Praxistest
 on:
   workflow_dispatch:
+    inputs:
+      managers_only:
+        description: Only the missing-Homebrew native tests
+        type: boolean
+        default: false
 permissions: {}
 jobs:
   platforms:
     uses: ./.github/workflows/native-platforms.yml
+    with:
+      managers_only: ${{ inputs.managers_only }}
