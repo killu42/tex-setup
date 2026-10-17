@@ -1,6 +1,6 @@
 {
   "mac": "s=$(curl -fsSL https://raw.githubusercontent.com/killu42/tex-setup/main/mac.sh) && eval \"$s\" &&\nbrew install --cask mactex && tex_update",
-  "intel": "tex_tmp=$(mktemp -d) &&\ncurl -fL https://mirror.ctan.org/systems/mac/mactex/MacTeX.pkg \\\n  -o \"$tex_tmp/MacTeX.pkg\" &&\nspctl --assess --type install \"$tex_tmp/MacTeX.pkg\" &&\nsudo installer -pkg \"$tex_tmp/MacTeX.pkg\" -target / &&\nsudo /Library/TeX/texbin/tlmgr update --self --all &&\nrm \"$tex_tmp/MacTeX.pkg\" && rmdir \"$tex_tmp\"",
+  "intel": "tex_tmp=$(mktemp -d) &&\ncurl -fL https://ctan.math.illinois.edu/systems/mac/mactex/MacTeX.pkg \\\n  -o \"$tex_tmp/MacTeX.pkg\" &&\nspctl --assess --type install \"$tex_tmp/MacTeX.pkg\" &&\nsudo installer -pkg \"$tex_tmp/MacTeX.pkg\" -target / &&\nsudo /Library/TeX/texbin/tlmgr update --self --all &&\nrm \"$tex_tmp/MacTeX.pkg\" && rmdir \"$tex_tmp\"",
   "linux": "sudo apt update && sudo apt install texlive-latex-extra texlive-lang-german \\\ntexlive-fonts-recommended biber latexmk texstudio",
   "windows": "irm https://raw.githubusercontent.com/killu42/tex-setup/main/win.ps1 | iex\nwinget install --id MiKTeX.MiKTeX -e --scope user -s winget --no-upgrade; Update-TeX",
   "mac_remove": "HOMEBREW_NO_AUTOREMOVE=1 brew uninstall --cask mactex",

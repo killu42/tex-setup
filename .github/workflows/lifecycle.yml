@@ -5,7 +5,7 @@ on:
       platform:
         type: choice
         default: all
-        options: [all, windows, linux, mac]
+        options: [all, windows, linux, mac, intel]
         description: Systeme fuer den vollstaendigen Installationstest
 permissions:
   contents: read
@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ inputs.platform == 'linux' && fromJSON('["ubuntu-24.04"]') || inputs.platform == 'mac' && fromJSON('["macos-15","macos-15-intel"]') || fromJSON('["ubuntu-24.04","macos-15","macos-15-intel"]') }}
+        os: ${{ inputs.platform == 'intel' && fromJSON('["macos-15-intel"]') || inputs.platform == 'linux' && fromJSON('["ubuntu-24.04"]') || inputs.platform == 'mac' && fromJSON('["macos-15","macos-15-intel"]') || fromJSON('["ubuntu-24.04","macos-15","macos-15-intel"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 180
     steps:
