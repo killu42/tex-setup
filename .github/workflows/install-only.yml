@@ -1,0 +1,26 @@
+name: Installation-only validation
+on:
+  pull_request:
+    paths: ['install.ps1', 'win.ps1', 'test-install.ps1', 'test-install-native.ps1', '.github/workflows/install-only.yml']
+permissions: {}
+jobs:
+  isolated:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: pwsh -NoProfile -File test-install.ps1
+  windows-legacy-repair:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Repair missing editor shortcut, repeat, launch and compile
+        shell: powershell
+        env:
+          TEST_REF: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $test=Invoke-RestMethod "https://raw.githubusercontent.com/killu42/tex-setup/$env:TEST_REF/test-install-native.ps1"
+          & ([scriptblock]::Create($test)) -Scenario legacy
