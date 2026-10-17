@@ -4,13 +4,13 @@ on:
     inputs:
       mode:
         type: choice
-        options: [all, mac]
+        options: [all, mac, bootstrap]
         default: all
-        description: Full matrix or focused Apple Silicon recheck
+        description: Full matrix, focused Mac recheck, or missing package managers
 permissions: {}
 jobs:
   windows:
-    if: inputs.mode != 'mac'
+    if: inputs.mode == 'all'
     strategy:
       fail-fast: false
       matrix:
@@ -29,7 +29,7 @@ jobs:
           $test=Invoke-RestMethod "https://raw.githubusercontent.com/killu42/tex-setup/$env:TEST_REF/test-pdf-windows.ps1"
           & ([scriptblock]::Create($test)) -Scenario $env:SCENARIO
   unix:
-    if: inputs.mode != 'mac'
+    if: inputs.mode == 'all'
     strategy:
       fail-fast: false
       matrix:
@@ -55,6 +55,41 @@ jobs:
           set -euo pipefail
           test_script=$(curl -fsSL --retry 3 "https://raw.githubusercontent.com/killu42/tex-setup/$TEST_REF/test-pdf-unix.sh")
           bash -c "$test_script"
+  missing-homebrew:
+    if: inputs.mode == 'bootstrap'
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Exact PDF lifecycle without pre-existing Homebrew
+        shell: bash
+        env:
+          TEST_REF: ${{ github.sha }}
+          TEST_PLATFORM: mac
+          TEST_MANAGER_ABSENT: '1'
+          NONINTERACTIVE: '1'
+          HOMEBREW_NO_ANALYTICS: '1'
+        run: |
+          set -euo pipefail
+          test_script=$(curl -fsSL --retry 3 "https://raw.githubusercontent.com/killu42/tex-setup/$TEST_REF/test-pdf-unix.sh")
+          bash -c "$test_script"
+  missing-winget:
+    if: inputs.mode == 'bootstrap'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - name: Exact PDF lifecycle without pre-existing WinGet
+        shell: powershell
+        env:
+          TEST_REF: ${{ github.sha }}
+          TEST_MANAGER_ABSENT: '1'
+        run: |
+          $ErrorActionPreference='Stop'
+          $test=Invoke-RestMethod "https://raw.githubusercontent.com/killu42/tex-setup/$env:TEST_REF/test-pdf-windows.ps1"
+          & ([scriptblock]::Create($test)) -Scenario fresh
   mac-recheck:
     if: inputs.mode == 'mac'
     runs-on: macos-15
