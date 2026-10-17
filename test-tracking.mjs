@@ -81,4 +81,38 @@ for(const shell of ['/bin/bash','/bin/zsh']) {
 check('No broad recursive deletion or system-policy bypass',()=>{
  for(const file of ['track.sh','track.ps1'])assert.doesNotMatch(readFileSync(join(dir,file),'utf8').split('\n').filter(l=>!l.trimStart().startsWith('#')).join('\n'),/rm -rf|Remove-Item[^\n]*-Recurse|--zap|--autoremove|--purge|Set-ExecutionPolicy/);
 });
+for(const shell of ['/bin/bash','/bin/zsh']) {
+  check(shell+' APT names resolve to exact dpkg multiarch identity',()=>{
+    const f=fixture({shell,os:'Linux'}); mkdirSync(f.state,{recursive:true});
+    writeFileSync(join(f.state,'after'),'');
+    writeFileSync(join(f.state,'completed.tmp'),'libsample:amd64\tii \t1\n');
+    writeFileSync(join(f.state,'plan'),'Inst libsample (1)\n');
+    const r=f.run(`tex_state="${f.state}"; tex_linux_new_packages`);
+    assert.equal(r.status,0,r.stderr); assert.equal(r.stdout,'libsample:amd64\n');
+  });
+  check(shell+' existing multiarch package cannot become newly owned',()=>{
+    const f=fixture({shell,os:'Linux'}); mkdirSync(f.state,{recursive:true});
+    writeFileSync(join(f.state,'after'),'libsample:amd64\tii \t1\n');
+    writeFileSync(join(f.state,'completed.tmp'),'libsample:amd64\tii \t2\n');
+    writeFileSync(join(f.state,'plan'),'Inst libsample [1] (2)\n');
+    const r=f.run(`tex_state="${f.state}"; tex_linux_new_packages`);
+    assert.equal(r.status,0,r.stderr); assert.equal(r.stdout,'');
+  });
+  check(shell+' ambiguous multiarch identity is rejected',()=>{
+    const f=fixture({shell,os:'Linux'}); mkdirSync(f.state,{recursive:true});
+    writeFileSync(join(f.state,'after'),'');
+    writeFileSync(join(f.state,'completed.tmp'),'libsample:amd64\tii \t1\nlibsample:i386\tii \t1\n');
+    writeFileSync(join(f.state,'plan'),'Inst libsample (1)\n');
+    assert.notEqual(f.run(`tex_state="${f.state}"; tex_linux_new_packages`).status,0);
+  });
+  check(shell+' removal aliases cannot include unrelated packages',()=>{
+    const f=fixture({shell,os:'Linux'}); mkdirSync(f.state,{recursive:true});
+    writeFileSync(join(f.state,'owned'),'libsample:amd64\n');
+    writeFileSync(join(f.state,'current.tmp'),'libsample:amd64\tii \t1\nother:amd64\tii \t1\n');
+    writeFileSync(join(f.state,'plan'),'Remv libsample [1]\n');
+    assert.equal(f.run(`tex_state="${f.state}"; tex_linux_removal_plan_safe`).status,0);
+    writeFileSync(join(f.state,'plan'),'Remv libsample [1]\nRemv other [1]\n');
+    assert.notEqual(f.run(`tex_state="${f.state}"; tex_linux_removal_plan_safe`).status,0);
+  });
+}
 console.log(count+' isolated tracking checks passed. No real installations/removals.');

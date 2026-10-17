@@ -207,6 +207,36 @@ tex_mac_fingerprint() (
 tex_packages() {
   LC_ALL=C dpkg-query -W '-f=${binary:Package}\t${db:Status-Abbrev}\t${Version}\n'
 }
+tex_linux_new_packages() {
+  # APT often omits :amd64 while dpkg reports it. Resolve only unambiguous
+  # installed identities; never treat an existing multiarch package as new.
+  awk '
+    FILENAME==ARGV[1] {old[$1]=1; next}
+    FILENAME==ARGV[2] {
+      if ($2=="ii") {installed[$1]=1; b=$1; sub(/:[^:]+$/,"",b); count[b]++; name[b]=$1}
+      next
+    }
+    /^Inst / {
+      p=$2
+      if (!installed[p]) {if (count[p]!=1) {exit 1}; p=name[p]}
+      if (!old[p]) print p
+    }
+  ' "$tex_state/after" "$tex_state/completed.tmp" "$tex_state/plan"
+}
+tex_linux_removal_plan_safe() {
+  awk '
+    FILENAME==ARGV[1] {own[$1]=1; next}
+    FILENAME==ARGV[2] {
+      if ($2=="ii") {installed[$1]=1; b=$1; sub(/:[^:]+$/,"",b); count[b]++; name[b]=$1}
+      next
+    }
+    /^Remv / {
+      p=$2
+      if (!installed[p]) {if (count[p]!=1) {exit 1}; p=name[p]}
+      if (!own[p]) exit 1
+    }
+  ' "$tex_state/owned" "$tex_state/current.tmp" "$tex_state/plan"
+}
 tex_install() (
   set -eu
   # Keep preparation out of the copy/paste block. Validate before any effects.
@@ -260,7 +290,7 @@ tex_install() (
       sudo apt-get --no-remove install -y texlive-latex-extra texlive-lang-german texlive-fonts-recommended biber latexmk texstudio
       # Pending stays if the native command failed. No retrospective ownership.
       tex_packages > "$tex_state/completed.tmp"
-      awk 'FILENAME==ARGV[1] {old[$1]=1; next} /^Inst / && !old[$2] {print $2}' "$tex_state/after" "$tex_state/plan" > "$tex_state/new.tmp"
+      tex_linux_new_packages > "$tex_state/new.tmp"
       if [ -f "$tex_state/owned" ]; then cat "$tex_state/owned" >> "$tex_state/new.tmp"; fi
       LC_ALL=C sort -u "$tex_state/new.tmp" > "$tex_state/owned"
       # Every newly recorded package must be successfully configured.
@@ -323,7 +353,7 @@ tex_remove() (
       if [ "$#" -gt 0 ]; then
         LC_ALL=C apt-get --simulate remove "$@" > "$tex_state/plan"
         ! grep -q '^Inst ' "$tex_state/plan" || { tex_error 'Entfernung wuerde weitere Pakete installieren.'; exit 1; }
-        awk 'FILENAME==ARGV[1] {own[$1]=1; next} /^Remv / && !own[$2] {exit 1}' "$tex_state/owned" "$tex_state/plan" || { tex_error 'Andere Programme benoetigen diese Pakete. Nichts entfernt.'; exit 1; }
+        tex_linux_removal_plan_safe || { tex_error 'Andere Programme benoetigen diese Pakete. Nichts entfernt.'; exit 1; }
         # dpkg removes ONLY this explicit list and refuses external dependants,
         # including changes since the simulation. No purge, force or autoremove.
         sudo dpkg --remove "$@"

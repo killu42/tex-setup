@@ -158,13 +158,27 @@ Case 'failed update of existing program does not run installer or permit removal
     winget; $script:failUpdate=$true; Throws { Setup }
     Assert ($script:installs -eq 1); Assert ($script:updates -eq 1)
     Assert ((Read-TeXRecord $script:dir).baseline -eq 'present')
-    Assert ((Read-TeXRecord $script:dir).status -eq 'pending')
-    Throws { Setup }; Throws { Remove-TeX }; Assert ($script:removals -eq 0)
+    Assert ((Read-TeXRecord $script:dir).status -eq 'retryable')
+    Throws { Remove-TeX }; Assert ($script:removals -eq 0)
+    $script:failUpdate=$false; Setup; Remove-TeX
+    Assert ($script:removals -eq 0); Assert ($script:installs -eq 1)
 }
-Case 'failed update of new program retains pending record' {
+Case 'failed update of new program resumes with original ownership' {
     $script:failUpdate=$true; Throws { Setup }
     Assert ((Read-TeXRecord $script:dir).baseline -eq 'absent')
-    Assert ((Read-TeXRecord $script:dir).status -eq 'pending'); Throws { Remove-TeX }
+    Assert ((Read-TeXRecord $script:dir).status -eq 'retryable'); Throws { Remove-TeX }
+    $script:failUpdate=$false; Setup; Setup; Remove-TeX
+    Assert ($script:removals -eq 1); Assert ($script:installs -eq 1)
+}
+Case 'changed files after failed update cannot be adopted on retry' {
+    $script:failUpdate=$true; Throws { Setup }
+    $script:failUpdate=$false; $script:fingerprint='user-change'
+    Throws { Setup }; Throws { Remove-TeX }; Assert ($script:updates -eq 1)
+}
+Case 'changed registration after failed update cannot be adopted on retry' {
+    $script:failUpdate=$true; Throws { Setup }
+    $script:failUpdate=$false; $script:apps[0].Location='other-root'
+    Throws { Setup }; Throws { Remove-TeX }; Assert ($script:updates -eq 1)
 }
 Case 'unknown TeX footprint blocks a second distribution' {
     $script:footprint=$true; Throws { Setup }

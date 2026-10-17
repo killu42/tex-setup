@@ -1,0 +1,89 @@
+name: Native Plattformtests
+on:
+  pull_request:
+    types: [opened, reopened]
+    paths:
+      - '*.sh'
+      - '*.ps1'
+      - '.github/workflows/native-platforms.yml'
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      suite:
+        type: string
+        default: all
+permissions: {}
+jobs:
+  unix:
+    if: ${{ inputs.suite == '' || inputs.suite == 'all' || inputs.suite == 'unix' }}
+    name: ${{ matrix.os }} - ${{ matrix.scenario }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, macos-15-intel]
+        scenario: [fresh, existing]
+    steps:
+      - name: Linux GUI test prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb xauth
+      - name: Real install, editor, PDF, repeat and removal
+        shell: bash
+        env:
+          TEST_SCENARIO: ${{ matrix.scenario }}
+          TEST_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_ANALYTICS: '1'
+          HOMEBREW_NO_ENV_HINTS: '1'
+          NONINTERACTIVE: '1'
+        run: |
+          set -euo pipefail
+          script=$(curl -fsSL --retry 3 "https://raw.githubusercontent.com/killu42/tex-setup/$TEST_REF/test-unix-native.sh")
+          bash -c "$script"
+  windows:
+    if: ${{ inputs.suite == '' || inputs.suite == 'all' || inputs.suite == 'windows' }}
+    name: ${{ matrix.os }} - ${{ matrix.scenario }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, windows-11-arm]
+        scenario: [fresh, existing, legacy]
+        include:
+          - os: windows-2022
+            scenario: manager-new
+    steps:
+      - name: Real install, editor, PDF, repeat and removal
+        shell: powershell
+        env:
+          TEST_SCENARIO: ${{ matrix.scenario }}
+          TEST_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Invoke-RestMethod "https://raw.githubusercontent.com/killu42/tex-setup/$env:TEST_REF/test-windows-native.ps1"
+          if ([string]::IsNullOrWhiteSpace($source)) { throw 'Empty test download' }
+          & ([scriptblock]::Create($source)) -Scenario $env:TEST_SCENARIO
+  mac-manager:
+    if: ${{ inputs.suite == '' || inputs.suite == 'all' || inputs.suite == 'mac-managers' }}
+    name: ${{ matrix.os }} - missing Homebrew
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel]
+    steps:
+      - name: Install, repeat and remove previously absent Homebrew
+        shell: bash
+        env:
+          TEST_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_ANALYTICS: '1'
+          HOMEBREW_NO_ENV_HINTS: '1'
+          NONINTERACTIVE: '1'
+        run: |
+          set -euo pipefail
+          script=$(curl -fsSL --retry 3 "https://raw.githubusercontent.com/killu42/tex-setup/$TEST_REF/test-mac-manager-native.sh")
+          bash -c "$script"
