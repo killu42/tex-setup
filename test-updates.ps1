@@ -9,7 +9,10 @@ $script:count = 0
 function Assert($Condition, $Message='Assertion failed') { if (-not $Condition) { throw $Message } }
 function Throws([scriptblock]$Action) { $caught=$false; try { & $Action } catch { $caught=$true }; Assert $caught 'Expected rejection' }
 function Test-TeXAdministrator { $script:admin }
+function Get-TeXRegistrations { $script:app }
 function Get-TeXInstallRoot { $script:installRoot }
+function Get-TeXDataRoots { (Join-Path $script:installRoot 'config'); (Join-Path $script:installRoot 'data') }
+function Read-TeXConfigReport($File) { $script:report }
 function Invoke-TeXNative([string]$File, [string[]]$Arguments) {
     $script:calls.Add([pscustomobject]@{File=$File;Arguments=$Arguments})
     if ($script:codes.Count -eq 0) { throw 'Unexpected native call' }
@@ -21,6 +24,8 @@ function Fixture {
     [void][IO.Directory]::CreateDirectory($bin)
     $script:exe = Join-Path $bin 'miktex.exe'
     Set-Content -LiteralPath $script:exe -Value 'mock only - never executed'
+    Set-Content -LiteralPath (Join-Path $bin 'initexmf.exe') -Value 'mock only - never executed'
+    $script:report=@("UserInstall: $script:installRoot", "UserConfig: $(Join-Path $script:installRoot 'config')", "UserData: $(Join-Path $script:installRoot 'data')")
     $script:app = [pscustomobject]@{Key='HKEY_CURRENT_USER\Software\MiKTeX';Location=$script:installRoot}
     $script:admin=$false
     $script:calls=[Collections.Generic.List[object]]::new()
@@ -123,4 +128,40 @@ Case 'native adapter exposes errors rather than reporting success' {
     Assert ((& $nativeInvoke $engine @('-NoProfile','-Command','exit 9')) -eq 9)
     Throws { & $nativeInvoke (Join-Path $root 'missing-command') @() }
 }
-Write-Host "$script:count isolated updater checks passed. No native Windows update test."
+Case 'uninstall uses registered integrated vendor tool in current-user mode' {
+    $setup=Join-Path (Split-Path -Parent $script:exe) 'miktexsetup.exe'
+    Set-Content -LiteralPath $setup -Value 'mock only - never executed'
+    Codes @(0); Invoke-TeXUninstall
+    Assert ($script:calls.Count -eq 1); Assert ($script:calls[0].File -eq $setup)
+    Assert (($script:calls[0].Arguments -join ' ') -eq '--verbose --shared=no uninstall')
+}
+Case 'missing integrated uninstaller fails without fallback or deletion' {
+    Throws { Invoke-TeXUninstall }; Assert ($script:calls.Count -eq 0)
+}
+Case 'shared installation never uninstalled automatically' {
+    $script:admin=$true; $script:app.Key='HKEY_LOCAL_MACHINE\Software\MiKTeX'
+    Throws { Invoke-TeXUninstall }; Assert ($script:calls.Count -eq 0)
+}
+Case 'uninstaller failure or missing exit code retains failure' {
+    $setup=Join-Path (Split-Path -Parent $script:exe) 'miktexsetup.exe'
+    Set-Content -LiteralPath $setup -Value 'mock only - never executed'
+    Codes @(9); Throws { Invoke-TeXUninstall }
+    $script:codes.Enqueue($null); Throws { Invoke-TeXUninstall }
+}
+Case 'custom data directory cannot be passed to vendor cleanup' {
+    $setup=Join-Path (Split-Path -Parent $script:exe) 'miktexsetup.exe'; Set-Content $setup 'mock'
+    $script:report[2]='UserData: /private/documents'; Codes @(0)
+    Throws { Invoke-TeXUninstall }; Assert ($script:calls.Count -eq 0)
+}
+Case 'missing or duplicate root report fails closed' {
+    $setup=Join-Path (Split-Path -Parent $script:exe) 'miktexsetup.exe'; Set-Content $setup 'mock'
+    $script:report += $script:report[0]; Throws { Invoke-TeXUninstall }
+    $script:report=@(); Throws { Invoke-TeXUninstall }; Assert ($script:calls.Count -eq 0)
+}
+Case 'linked data directory cannot be passed to vendor cleanup' {
+    $setup=Join-Path (Split-Path -Parent $script:exe) 'miktexsetup.exe'; Set-Content $setup 'mock'
+    $target=Join-Path $root ('outside-'+[guid]::NewGuid()); [void][IO.Directory]::CreateDirectory($target)
+    [void](New-Item -ItemType SymbolicLink -Path (Join-Path $script:installRoot 'data') -Target $target)
+    Throws { Invoke-TeXUninstall }; Assert ($script:calls.Count -eq 0)
+}
+Write-Host "$script:count isolated updater/uninstaller checks passed. No native Windows update test."

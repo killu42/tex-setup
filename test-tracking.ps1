@@ -38,6 +38,8 @@ function Update-TeX($Updater) {
     if ($script:changeAfterUpdate) { $script:apps[0].Location='other-root' }
 }
 function Get-AppxPackage { @() }
+function Ensure-TeXEditor($Updater, $Record) { }
+function Remove-TeXEditorLinks($Record) { }
 # Manager provenance has its own isolated suite; this suite covers TeX state.
 function Initialize-TeXManager([scriptblock]$Bootstrap) { & $Bootstrap }
 function Invoke-RestMethod {
@@ -194,5 +196,44 @@ Case 'repeat updates of existing program remain protected' {
     winget; Setup; Setup; Assert ($script:installs -eq 1); Assert ($script:updates -eq 2)
     Assert ((Read-TeXRecord $script:dir).baseline -eq 'present')
     Remove-TeX; Assert ($script:removals -eq 0); Assert ($script:apps[0].Version -eq '3')
+}
+Case 'old record with unchanged inventory migrates without losing provenance' {
+    Setup; $r=Read-TeXRecord $script:dir; $r.PSObject.Properties.Remove('inventoryVersion'); Save-TeXRecord $script:dir $r
+    Setup; $r=Read-TeXRecord $script:dir; Assert ($r.baseline -eq 'absent'); Assert ($r.inventoryVersion -eq 2)
+    Remove-TeX; Assert ($script:removals -eq 1)
+}
+Case 'old record with unverifiable inventory permits repair but never deletion' {
+    Setup; $r=Read-TeXRecord $script:dir; $r.PSObject.Properties.Remove('inventoryVersion'); Save-TeXRecord $script:dir $r
+    $script:fingerprint='changed'; Setup
+    Assert ((Read-TeXRecord $script:dir).baseline -eq 'present')
+    Remove-TeX; Assert ($script:removals -eq 0)
+}
+Case 'old settings provenance never grants automatic removal' {
+    Setup; $r=Read-TeXRecord $script:dir; $r.PSObject.Properties.Remove('cleanupRootsFresh'); Save-TeXRecord $script:dir $r
+    Setup; Assert ((Read-TeXRecord $script:dir).baseline -eq 'present')
+    Remove-TeX; Assert ($script:removals -eq 0)
+}
+Case 'direct removal of old settings provenance preserves installation' {
+    Setup; $r=Read-TeXRecord $script:dir; $r.PSObject.Properties.Remove('cleanupRootsFresh'); Save-TeXRecord $script:dir $r
+    Remove-TeX; Assert ($script:removals -eq 0); Assert ($script:apps.Count -eq 1)
+}
+Case 'stable inventory ignores only ordinary runtime lock timestamps' {
+    $folder=Join-Path $script:installRoot 'miktex'; [void][IO.Directory]::CreateDirectory($folder)
+    $lock=Join-Path $folder 'lock'; [IO.File]::WriteAllText($lock,'x')
+    $first=& $nativeInventory -Stable; $legacy=& $nativeInventory
+    [IO.File]::SetLastWriteTimeUtc($lock,[DateTime]::UtcNow.AddMinutes(2))
+    [IO.Directory]::SetLastWriteTimeUtc($folder,[DateTime]::UtcNow.AddMinutes(2))
+    Assert ($first -eq (& $nativeInventory -Stable)); Assert ($legacy -ne (& $nativeInventory))
+    [IO.File]::WriteAllText((Join-Path $folder 'personal.tex'),'private')
+    Assert ($first -ne (& $nativeInventory -Stable))
+}
+Case 'stable inventory rejects altered ordinary files and lock replacement' {
+    $folder=Join-Path $script:installRoot 'miktex'; [void][IO.Directory]::CreateDirectory($folder)
+    $file=Join-Path $folder 'program.dat'; [IO.File]::WriteAllText($file,'data')
+    $first=& $nativeInventory -Stable
+    [IO.File]::SetLastWriteTimeUtc($file,[DateTime]::UtcNow.AddMinutes(2))
+    Assert ($first -ne (& $nativeInventory -Stable))
+    $lock=Join-Path $folder 'lock'; [IO.File]::WriteAllText($lock,'x'); $first=& $nativeInventory -Stable
+    [IO.File]::WriteAllText($lock,'different'); Assert ($first -ne (& $nativeInventory -Stable))
 }
 Write-Host "$script:count isolated PowerShell checks passed. No native Windows installation test."

@@ -11,7 +11,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-2025, windows-11-arm]
-        scenario: [fresh, existing, manager-new]
+        scenario: [fresh, existing, legacy]
     steps:
       - name: Native installation, update, removal and preservation
         shell: powershell
