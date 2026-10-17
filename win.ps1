@@ -2,6 +2,8 @@
 # Only WinGet is installed/updated here, never a TeX distribution.
 function Install-TeXWinGetRelease {
     param([string]$Architecture = [Environment]::GetEnvironmentVariable('PROCESSOR_ARCHITECTURE','Machine'))
+    # Local only: PowerShell 5's per-chunk progress rendering slows large files.
+    $ProgressPreference = 'SilentlyContinue'
     # Microsoft's signed release assets are also the documented offline route.
     # Appx performs publisher/signature/dependency checks; no policy bypass.
     $release = 'https://github.com/microsoft/winget-cli/releases/latest/download/'

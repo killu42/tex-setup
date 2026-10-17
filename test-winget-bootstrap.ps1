@@ -8,6 +8,7 @@ $function=$ast.Find({param($node) $node -is [Management.Automation.Language.Func
 $script:count=0
 function Assert($condition) { if (-not $condition) { throw 'Assertion failed' } }
 function Invoke-WebRequest([switch]$UseBasicParsing,$Uri,$OutFile) {
+    Assert ($ProgressPreference -eq 'SilentlyContinue')
     Assert ($Uri -like 'https://github.com/microsoft/winget-cli/releases/latest/download/*')
     if ($script:failDownload) { throw 'mock network failure' }
     $script:directory=Split-Path -Parent $OutFile
@@ -44,4 +45,9 @@ Case 'unknown architecture never installs' { Throws { Install-TeXWinGetRelease -
 Case 'missing dependencies never installs' { $script:missingDependencies=$true; Throws { Install-TeXWinGetRelease -Architecture 'AMD64' }; Assert ($script:installs -eq 0) }
 Case 'download failure never installs' { $script:failDownload=$true; Throws { Install-TeXWinGetRelease -Architecture 'AMD64' }; Assert ($script:installs -eq 0) }
 Case 'Appx security rejection propagates and cleans only temporary assets' { $script:expected='x64'; $script:failInstall=$true; Throws { Install-TeXWinGetRelease -Architecture 'AMD64' }; Assert ($script:installs -eq 1) }
+Case 'download progress preference stays local to the function' {
+    $ProgressPreference='Continue'; $script:expected='x64'
+    Install-TeXWinGetRelease -Architecture 'AMD64'
+    Assert ($ProgressPreference -eq 'Continue')
+}
 Write-Host "$script:count isolated WinGet release checks passed. No real Appx installation."
