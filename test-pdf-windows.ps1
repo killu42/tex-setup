@@ -49,6 +49,7 @@ Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
 $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($commands.windows_remove))
 $remove=Start-Process powershell.exe -ArgumentList @('-NoProfile','-EncodedCommand',$encoded) -PassThru
 $deadline=[DateTime]::UtcNow.AddMinutes(5)
+$confirmed=@{}
 do {
     $desktop=[Windows.Automation.AutomationElement]::RootElement
     foreach ($console in @(Get-Process -Name '*miktex-console*' -ErrorAction SilentlyContinue)) {
@@ -58,10 +59,12 @@ do {
             $buttons=$window.FindAll([Windows.Automation.TreeScope]::Descendants,
                 [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty,[Windows.Automation.ControlType]::Button))
             foreach ($button in $buttons) {
-                if ($button.Current.IsEnabled -and $button.Current.Name -match '^(&?Remove MiKTeX|&?Yes|&?OK)$') {
-                    Write-Host "CONFIRM $($button.Current.Name)"
+                $name=$button.Current.Name.Replace('&','')
+                if ($button.Current.IsEnabled -and $name -in @('Remove MiKTeX','Yes') -and -not $confirmed[$name]) {
+                    Write-Host "CONFIRM $name"
                     $pattern=$button.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern)
                     $pattern.Invoke()
+                    $confirmed[$name]=$true
                 }
             }
         }
