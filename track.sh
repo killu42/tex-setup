@@ -35,16 +35,152 @@ tex_brew_path() {
   if [ -z "$tex_brew" ] && [ -x /usr/local/bin/brew ]; then tex_brew=/usr/local/bin/brew; fi
   [ -n "$tex_brew" ]
 }
+tex_manager_location() {
+  [ "$(uname -s)" = Darwin ] || { tex_error 'Homebrew-Entfernung nur unter macOS.'; return 1; }
+  tex_location || return
+  tex_manager_state="$tex_state-manager"
+  [ ! -L "$tex_manager_state" ] || { tex_error 'Paketmanager-Nachweis ist ein Link.'; return 1; }
+}
+tex_manager_lock() {
+  tex_manager_location || return
+  umask 077
+  mkdir -p "$tex_manager_state" || return
+  [ -O "$tex_manager_state" ] || { tex_error 'Falscher Besitzer des Paketmanager-Nachweises.'; return 1; }
+  mkdir "$tex_manager_state/lock" 2>/dev/null || { tex_error 'Paketmanager-Vorgang gesperrt.'; return 1; }
+  tex_manager_lock_held=1
+  for tex_name in schema user baseline prefix after status transaction; do
+    [ ! -L "$tex_manager_state/$tex_name" ] || return 1
+    [ ! -e "$tex_manager_state/$tex_name" ] || [ -f "$tex_manager_state/$tex_name" ] || return 1
+  done
+  if [ -e "$tex_manager_state/schema" ]; then
+    [ "$(cat "$tex_manager_state/schema")" = tex-manager-1 ] &&
+      [ "$(cat "$tex_manager_state/user")" = "$(id -u)" ] || return 1
+    case "$(cat "$tex_manager_state/baseline")" in present|absent|protected) ;; *) return 1 ;; esac
+    case "$(cat "$tex_manager_state/status")" in pending|complete) ;; *) return 1 ;; esac
+  else
+    [ "$(ls -A "$tex_manager_state")" = lock ] || { tex_error 'Unvollstaendiger Paketmanager-Nachweis.'; return 1; }
+  fi
+}
+tex_manager_default_prefix() {
+  if [ "$(uname -m)" = arm64 ]; then printf '/opt/homebrew\n'; else printf '/usr/local\n'; fi
+}
+tex_manager_existing() {
+  tex_brew_path && return 0
+  # Broken installations and a second architecture must also be preserved.
+  for tex_path in /opt/homebrew /usr/local/Homebrew /usr/local/Cellar /usr/local/Caskroom /usr/local/.git /usr/local/Library/Homebrew; do
+    if [ -e "$tex_path" ] || [ -L "$tex_path" ]; then return 0; fi
+  done
+  return 1
+}
+tex_manager_prefix() {
+  tex_prefix=$(cat "$tex_manager_state/prefix") || return
+  case "$tex_prefix" in /opt/homebrew|/usr/local) ;; *) tex_error 'Unbekannter Homebrew-Pfad.'; return 1 ;; esac
+  [ ! -L "$tex_prefix" ] && [ -d "$tex_prefix" ] || return 1
+}
+tex_manager_fingerprint() (
+  set -o pipefail
+  tex_manager_prefix || exit 1
+  # Include additions and changes anywhere in the prefix, including non-brew
+  # files in /usr/local. Directory timestamps are excluded; file metadata is not.
+  { find "$tex_prefix" -type d -exec stat -f '%N|%HT|%i' {} + &&
+    find "$tex_prefix" ! -type d -exec stat -f '%N|%HT|%z|%m|%i|%Y' {} +; } |
+    LC_ALL=C sort | shasum -a 256
+)
+tex_manager_preserve_changes() {
+  if [ "$(cat "$tex_manager_state/baseline")" = absent ]; then
+    tex_observed=$(tex_manager_fingerprint) || tex_observed=
+    if [ -z "$tex_observed" ] || [ "$tex_observed" != "$(cat "$tex_manager_state/after")" ]; then
+      printf 'protected\n' > "$tex_manager_state/baseline"
+    fi
+  fi
+}
+tex_manager_prepare() (
+  set -eu
+  tex_manager_lock_held=0
+  trap '[ "$tex_manager_lock_held" != 1 ] || rmdir "$tex_manager_state/lock" 2>/dev/null || :' EXIT
+  tex_manager_lock || exit 1
+  if [ ! -f "$tex_manager_state/schema" ]; then
+    if tex_manager_existing; then tex_before=present; else tex_before=absent; fi
+    printf '%s\n' "$tex_before" > "$tex_manager_state/baseline" || exit 1
+    id -u > "$tex_manager_state/user" || exit 1
+    tex_manager_default_prefix > "$tex_manager_state/prefix" || exit 1
+    printf 'tex-manager-1\n' > "$tex_manager_state/schema" || exit 1
+  else
+    [ "$(cat "$tex_manager_state/status")" = complete ] || { tex_error 'Fruehere Einrichtung unvollstaendig.' || :; exit 1; }
+    tex_manager_preserve_changes || exit 1
+  fi
+  printf 'pending\n' > "$tex_manager_state/status" || exit 1
+  tex_bootstrap=$(curl -fsSL https://raw.githubusercontent.com/killu42/tex-setup/main/mac.sh) || exit 1
+  [ -n "$tex_bootstrap" ] || exit 1
+  # A separate shell retains errexit even when the caller uses && or ||.
+  /bin/bash -eu -c "$tex_bootstrap" || exit 1
+  if [ "$(cat "$tex_manager_state/baseline")" = absent ]; then
+    tex_brew_path || exit 1
+    [ "$("$tex_brew" --prefix)" = "$(cat "$tex_manager_state/prefix")" ] || exit 1
+    tex_manager_fingerprint > "$tex_manager_state/after" || exit 1
+  fi
+  printf 'complete\n' > "$tex_manager_state/status"
+)
+tex_manager_begin() {
+  tex_manager_token=
+  tex_manager_location || return
+  [ -d "$tex_manager_state" ] || return 0
+  tex_manager_token="$$-$(date +%s)-$RANDOM"
+  (set -eu
+   tex_manager_lock_held=0
+   trap '[ "$tex_manager_lock_held" != 1 ] || rmdir "$tex_manager_state/lock" 2>/dev/null || :' EXIT
+   tex_manager_lock || exit 1
+   [ "$(cat "$tex_manager_state/status")" = complete ] || exit 1
+   tex_manager_preserve_changes || exit 1
+   printf 'pending\n' > "$tex_manager_state/status"
+   printf '%s\n' "$tex_manager_token" > "$tex_manager_state/transaction")
+}
+tex_manager_finish() (
+  set -eu
+  [ -n "${tex_manager_token:-}" ] || exit 0
+  tex_manager_lock_held=0
+  trap '[ "$tex_manager_lock_held" != 1 ] || rmdir "$tex_manager_state/lock" 2>/dev/null || :' EXIT
+  tex_manager_lock || exit 1
+  [ "$(cat "$tex_manager_state/status")" = pending ] &&
+    [ "$(cat "$tex_manager_state/transaction")" = "$tex_manager_token" ] || exit 1
+  if [ "$(cat "$tex_manager_state/baseline")" = absent ]; then
+    tex_manager_fingerprint > "$tex_manager_state/after"
+  fi
+  rm "$tex_manager_state/transaction"
+  printf 'complete\n' > "$tex_manager_state/status"
+)
+tex_manager_uninstall() {
+  tex_uninstaller=$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh) || return
+  [ -n "$tex_uninstaller" ] || return 1
+  /bin/bash -c "$tex_uninstaller" -- --path "$tex_prefix"
+}
+tex_remove_manager() (
+  set -eu
+  tex_manager_lock_held=0
+  trap '[ "$tex_manager_lock_held" != 1 ] || rmdir "$tex_manager_state/lock" 2>/dev/null || :' EXIT
+  tex_manager_location || exit 1
+  [ -d "$tex_manager_state" ] || { printf 'Kein eindeutiger Homebrew-Nachweis. Nichts entfernt.\n'; exit 0; }
+  tex_manager_lock || exit 1
+  [ "$(cat "$tex_manager_state/status")" = complete ] || { tex_error 'Einrichtung unvollstaendig. Homebrew bleibt erhalten.' || :; exit 1; }
+  [ "$(cat "$tex_manager_state/baseline")" = absent ] || { printf 'Vorhandenes oder inzwischen veraendertes Homebrew bleibt erhalten.\n'; exit 0; }
+  [ ! -e "$tex_state" ] || { tex_error 'Zuerst die TeX-Entfernung abschliessen.' || :; exit 1; }
+  tex_manager_prefix || exit 1
+  tex_observed=$(tex_manager_fingerprint) || exit 1
+  [ -n "$tex_observed" ] && [ "$tex_observed" = "$(cat "$tex_manager_state/after")" ] || { tex_error 'Homebrew wurde inzwischen veraendert oder anderweitig genutzt. Nichts entfernt.' || :; exit 1; }
+  tex_manager_uninstall || exit 1
+  [ ! -e "$tex_prefix/bin/brew" ] && [ ! -L "$tex_prefix/bin/brew" ] || { tex_error 'Homebrew-Entfernung nicht abgeschlossen.' || :; exit 1; }
+  for tex_name in schema user baseline prefix after status; do
+    [ ! -f "$tex_manager_state/$tex_name" ] || rm "$tex_manager_state/$tex_name"
+  done
+  rmdir "$tex_manager_state/lock"
+  trap - EXIT
+  rmdir "$tex_manager_state"
+  printf 'Neu eingerichtetes Homebrew entfernt.\n'
+)
 tex_prepare() {
   # Bootstrap remains separate from the visible TeX installation command.
   if [ "$(uname -s)" = Darwin ]; then
-    tex_manager_before=present
-    tex_brew_path || tex_manager_before=absent
-    (tex_lock_held=0
-     trap '[ "$tex_lock_held" != 1 ] || rmdir "$tex_state/lock" 2>/dev/null || :' EXIT
-     tex_lock && { [ -e "$tex_state/manager" ] || printf 'Homebrew\t%s\tshared-infrastructure\n' "$tex_manager_before" > "$tex_state/manager"; }) || return
-    tex_bootstrap=$(curl -fsSL https://raw.githubusercontent.com/killu42/tex-setup/main/mac.sh) || return
-    eval "$tex_bootstrap" || return
+    tex_manager_prepare || return
   elif [ "$(uname -s)" = Linux ]; then
     command -v apt-get >/dev/null && command -v dpkg-query >/dev/null || return
   else
@@ -101,10 +237,12 @@ tex_install() (
         [ "$(tex_mac_fingerprint)" = "$(cat "$tex_state/after")" ] || { tex_error 'Installation wurde inzwischen veraendert; Nachweis bleibt unveraendert.'; exit 1; }
       fi
       printf 'install\n' > "$tex_state/pending"
+      tex_manager_begin
       HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_AUTOREMOVE=1 "$tex_brew" install --cask mactex
       "$tex_brew" list --cask --versions mactex > "$tex_state/owned"
       [ -s "$tex_state/owned" ] || exit 1
       tex_mac_fingerprint > "$tex_state/after"
+      tex_manager_finish
       ;;
     Linux)
       [ "$*" = 'sudo apt-get install -y texlive-latex-extra texlive-lang-german texlive-fonts-recommended biber latexmk texstudio' ] || { tex_error 'Nur der APT-Befehl aus der Anleitung ist erlaubt.'; exit 1; }
@@ -159,8 +297,10 @@ tex_remove() (
       if [ -n "$tex_current" ]; then
         [ "$tex_current" = "$(cat "$tex_state/owned")" ] && [ "$(tex_mac_fingerprint)" = "$(cat "$tex_state/after")" ] || { tex_error 'MacTeX oder sein Programmordner wurde nachtraeglich veraendert. Nichts entfernt.'; exit 1; }
         # No --zap; user settings, templates and documents are never selected.
+        tex_manager_begin
         HOMEBREW_NO_AUTOREMOVE=1 "$tex_brew" uninstall --cask mactex
         [ -z "$("$tex_brew" list --cask --versions mactex)" ] || exit 1
+        tex_manager_finish
       elif tex_mac_existing; then
         tex_error 'MacTeX-Nachweis fehlt, aber TeX-Dateien sind noch vorhanden. Protokoll bleibt erhalten.'; exit 1
       fi

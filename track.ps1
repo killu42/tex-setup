@@ -60,6 +60,118 @@ function Use-TeXRecord([scriptblock]$Action, [switch]$ExistingOnly) {
         Remove-Item -LiteralPath $dir -Force
     }
 }
+function Get-TeXManagerPath { (Get-TeXRecordPath) + '-manager' }
+function Read-TeXManagerRecord([string]$Dir) {
+    $file = Join-Path $Dir 'state.json'
+    Assert-TeXPlainPath $file
+    if (-not (Test-Path -LiteralPath $file)) {
+        if (@(Get-ChildItem -LiteralPath $Dir -Force | Where-Object Name -ne 'lock').Count -gt 0) {
+            throw 'Unvollstaendiger Paketmanager-Nachweis. Nichts entfernt.'
+        }
+        return $null
+    }
+    $record = Get-Content -LiteralPath $file -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    if ($record.schema -ne 'tex-manager-1' -or $record.user -ne (Get-TeXUser) -or
+        $record.baseline -notin @('present','absent','protected') -or $record.status -notin @('pending','complete')) {
+        throw 'Ungueltiger Paketmanager-Nachweis. Nichts entfernt.'
+    }
+    $record
+}
+function Use-TeXManagerRecord([scriptblock]$Action, [switch]$ExistingOnly) {
+    $ErrorActionPreference = 'Stop'
+    $dir = Get-TeXManagerPath
+    Assert-TeXPlainPath $dir
+    if ($ExistingOnly -and -not (Test-Path -LiteralPath $dir)) {
+        Write-Host 'Kein eindeutiger WinGet-Nachweis. Nichts entfernt.'
+        return
+    }
+    if (-not (Test-Path -LiteralPath $dir)) { [void][IO.Directory]::CreateDirectory($dir) }
+    $item = Get-Item -LiteralPath $dir -Force
+    $item.Attributes = $item.Attributes -bor [IO.FileAttributes]::Hidden
+    $lockFile = Join-Path $dir 'lock'
+    Assert-TeXPlainPath $lockFile
+    $lock = [IO.File]::Open($lockFile,[IO.FileMode]::CreateNew,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+    try { & $Action $dir } finally {
+        $lock.Dispose()
+        Remove-Item -LiteralPath $lockFile -Force
+    }
+    if (@(Get-ChildItem -LiteralPath $dir -Force).Count -eq 0) { Remove-Item -LiteralPath $dir -Force }
+}
+function Get-TeXManagerPackages {
+    # Current user only; never uninstall provisioned packages or other users' copies.
+    @(Get-AppxPackage -Name Microsoft.DesktopAppInstaller -ErrorAction Stop)
+}
+function Test-TeXManagerCommand { [bool](Get-Command winget.exe -ErrorAction SilentlyContinue) }
+function Get-TeXManagerIdentity($Packages) {
+    $apps = @($Packages)
+    if ($apps.Count -ne 1 -or $apps[0].Name -ne 'Microsoft.DesktopAppInstaller' -or
+        $apps[0].PackageFamilyName -ne 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe' -or
+        $apps[0].PublisherId -ne '8wekyb3d8bbwe' -or
+        [string]::IsNullOrWhiteSpace($apps[0].PackageFullName) -or
+        [string]::IsNullOrWhiteSpace([string]$apps[0].Version) -or
+        [string]::IsNullOrWhiteSpace($apps[0].InstallLocation)) {
+        throw 'App-Installer nicht eindeutig zuzuordnen. Nichts entfernt.'
+    }
+    $apps[0] | Select-Object Name,PackageFamilyName,PublisherId,PackageFullName,
+        @{Name='Version';Expression={[string]$_.Version}},InstallLocation
+}
+function Test-TeXManagerIdentity($Saved, $Current) {
+    if (-not $Saved -or -not $Current) { return $false }
+    foreach ($key in @('Name','PackageFamilyName','PublisherId','PackageFullName','Version','InstallLocation')) {
+        if ([string]::IsNullOrWhiteSpace([string]$Saved.$key) -or $Saved.$key -cne $Current.$key) { return $false }
+    }
+    $true
+}
+function Initialize-TeXManager([scriptblock]$Bootstrap) {
+    Use-TeXManagerRecord {
+        param($dir)
+        $record = Read-TeXManagerRecord $dir
+        $before = @(Get-TeXManagerPackages)
+        if (-not $record) {
+            # Old TeX records are deliberately NOT treated as proof of ownership.
+            $present = $before.Count -gt 0 -or (Test-TeXManagerCommand)
+            $record = [pscustomobject]@{
+                schema='tex-manager-1'; user=(Get-TeXUser)
+                baseline=$(if ($present) {'present'} else {'absent'}); status='pending'; after=$null
+            }
+        } else {
+            if ($record.status -ne 'complete') { throw 'Fruehere WinGet-Einrichtung unvollstaendig. Nachweis bleibt erhalten.' }
+            if ($record.baseline -eq 'absent') {
+                $identity = $null
+                try { $identity = Get-TeXManagerIdentity $before } catch { }
+                if (-not (Test-TeXManagerIdentity $record.after $identity)) { $record.baseline = 'protected' }
+            }
+            $record.status = 'pending'
+        }
+        Save-TeXRecord $dir $record
+        & $Bootstrap
+        if ($record.baseline -eq 'absent') {
+            $record.after = Get-TeXManagerIdentity @(Get-TeXManagerPackages)
+        }
+        $record.status = 'complete'
+        Save-TeXRecord $dir $record
+    }
+}
+function Remove-TeXManager {
+    Use-TeXManagerRecord -ExistingOnly {
+        param($dir)
+        $record = Read-TeXManagerRecord $dir
+        if (-not $record -or $record.status -ne 'complete') { throw 'Kein abgeschlossener WinGet-Nachweis. Nichts entfernt.' }
+        if ($record.baseline -ne 'absent') {
+            Write-Host 'Vorhandenes oder inzwischen veraendertes WinGet bleibt erhalten.'
+            return
+        }
+        if (Test-Path -LiteralPath (Get-TeXRecordPath)) { throw 'Zuerst die TeX-Entfernung abschliessen.' }
+        $apps = @(Get-TeXManagerPackages)
+        $identity = Get-TeXManagerIdentity $apps
+        if (-not (Test-TeXManagerIdentity $record.after $identity)) { throw 'App-Installer inzwischen veraendert. Nichts entfernt.' }
+        if ($apps[0].NonRemovable) { throw 'Windows schuetzt den App-Installer als Systemkomponente. Er bleibt erhalten.' }
+        Remove-AppxPackage -Package $identity.PackageFullName -ErrorAction Stop
+        if (@(Get-TeXManagerPackages).Count -ne 0) { throw 'WinGet-Entfernung nicht abgeschlossen. Nachweis bleibt erhalten.' }
+        Remove-Item -LiteralPath (Join-Path $dir 'state.json') -Force -ErrorAction Stop
+        Write-Host 'Neu eingerichtetes WinGet samt App-Installer fuer dieses Konto entfernt.'
+    }
+}
 function Get-TeXRegistrations {
     $roots = @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
         'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
@@ -170,8 +282,11 @@ function Initialize-TeX {
             Save-TeXRecord $dir $record
         }
         if ($record.status -eq 'pending') { throw 'Vorherige Installation unvollstaendig. Nachweis bleibt erhalten.' }
-        $bootstrap = Invoke-RestMethod 'https://raw.githubusercontent.com/killu42/tex-setup/main/win.ps1' -ErrorAction Stop
-        Invoke-Expression $bootstrap
+        Initialize-TeXManager {
+            $bootstrap = Invoke-RestMethod 'https://raw.githubusercontent.com/killu42/tex-setup/main/win.ps1' -ErrorAction Stop
+            if ([string]::IsNullOrWhiteSpace($bootstrap)) { throw 'Download ist leer.' }
+            Invoke-Expression $bootstrap
+        }
     }
 }
 function Install-TeX([scriptblock]$Command) {

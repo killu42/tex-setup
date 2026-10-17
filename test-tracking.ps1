@@ -38,6 +38,8 @@ function Update-TeX($Updater) {
     if ($script:changeAfterUpdate) { $script:apps[0].Location='other-root' }
 }
 function Get-AppxPackage { @() }
+# Manager provenance has its own isolated suite; this suite covers TeX state.
+function Initialize-TeXManager([scriptblock]$Bootstrap) { & $Bootstrap }
 function Invoke-RestMethod {
     $script:bootstrapCalls++
     if ($script:failBootstrap) { Write-Error 'mock download failure'; return }

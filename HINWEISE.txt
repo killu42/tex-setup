@@ -41,6 +41,9 @@ Lokale Ablage und Datenschutz
 Mac:     ~/Library/Application Support/TeX-Setup/
 Windows: %LOCALAPPDATA%\TeX-Setup\state.json (Ordner mit Hidden-Attribut)
 Linux:   ${XDG_STATE_HOME:-~/.local/state}/tex-setup/
+Homebrew: ~/Library/Application Support/TeX-Setup-manager/
+WinGet:   %LOCALAPPDATA%\TeX-Setup-manager\state.json (Hidden)
+Die getrennten Paketmanager-Nachweise ueberstehen die normale TeX-Entfernung.
 Die Protokolle liegen nur auf dem jeweiligen Rechner. Sie werden niemals
 hochgeladen und geben keinen Schreibzugriff auf GitHub. Sie enthalten
 Paketnamen, Versionen, Installationsstatus und lokale Pruefmerkmale.
@@ -53,6 +56,38 @@ remove.ps1 uebernimmt Laden und Entfernen fuer den einzeiligen Windows-Aufruf.
 Dabei werden keine fehlenden Paketmanager nachinstalliert oder aktualisiert.
 Bekannte Protokolldateien werden erst nach erfolgreicher Entfernung geloescht;
 bei Fehlern oder unklarem Nachweis bleiben sie fuer die weitere Klaerung erhalten.
+
+Optionale Paketmanager-Entfernung
+-------------------------------
+brew-rm.sh bzw. wg-rm.ps1 laden nur den Tracker und rufen tex_remove_manager
+bzw. Remove-TeXManager auf. Keine Einrichtung oder Aktualisierung beim Entfernen.
+Nur ein neuer, abgeschlossener Manager-Nachweis mit anfangs fehlendem Programm
+erlaubt die Entfernung. Vorhandenes Homebrew bzw. WinGet/App-Installer wird
+einschliesslich seiner Updates niemals als eigene Neuinstallation beansprucht.
+Alte TeX-Protokolle reichen dafuer nicht aus: Fuer Installationen vor Einfuehrung
+dieser separaten Nachweise wird nichts nachtraeglich zur Entfernung freigegeben.
+Fehlende, unvollstaendige, gesperrte, widerspruechliche oder fremde Nachweise
+fuehren zum Erhalt. Zuerst muss die normale TeX-Entfernung abgeschlossen werden.
+
+Homebrew: Auch kaputte Standardinstallationen und beide Mac-Architekturen
+gelten als vorher vorhanden. Bei neuem Homebrew werden Prefix und Dateibaum-
+Metadaten verglichen. Spaetere Pakete, fremde Dateien oder Aenderungen sperren
+die Entfernung. Wiederholte Einrichtung uebernimmt solche Aenderungen nicht.
+Eigene TeX-Transaktionen erneuern den Fingerabdruck nur nach passendem Ausgangs-
+zustand und Erfolg. Danach wird ausschliesslich der offizielle Homebrew-
+Uninstaller fuer den geprueften Standardprefix aufgerufen, ohne --force.
+Er entfernt auch dort verbliebene, durch das Setup installierte Homebrew-Pakete.
+Bei Abbruch bleibt der Nachweis unvollstaendig; keine automatische Uebernahme.
+
+WinGet: Vorher vorhandenes winget.exe ODER ein registrierter App-Installer
+verhindert eine Eigentumszuordnung. Nur das exakt aufgezeichnete Microsoft-
+Appx-Paket fuer das aktuelle Konto kann entfernt werden. Version, Paketname,
+Publisher und Installationsort muessen passen. Fremde Updates werden nicht
+uebernommen. Keine -AllUsers-Entfernung, kein Entfernen provisionierter Pakete,
+keine Umgehung von NonRemovable oder Windows-Sicherheitsregeln. Windows kann
+den App-Installer als Systemkomponente schuetzen; dann bleibt er erhalten.
+Andere installierte Programme werden durch diesen Appx-Aufruf nicht entfernt.
+Nach bestaetigter Entfernung werden nur die eigenen Manager-Nachweise geloescht.
 
 Schutzregeln und Grenzen
 -----------------------
@@ -75,10 +110,11 @@ Schutzregeln und Grenzen
   Eine Entfernungssimulation darf keine fremden Pakete betreffen. dpkg entfernt
   ausschliesslich die explizite Liste und verweigert verletzte Abhaengigkeiten.
   Veraenderte Paketdateien stoppen die Entfernung. Kein autoremove/purge/force.
-- Homebrew, WinGet/App-Installer, NuGet, PowerShell-Einrichtungsmodule, Apple-
-  Entwicklerwerkzeuge und Ghostscript werden NICHT automatisch entfernt, auch
-  wenn sie vorher fehlten. Sie sind gemeinsam nutzbare Infrastruktur. Es ist
-  keine vollstaendige Ruecksetzung des Rechners auf einen Snapshot.
+- Die normalen TeX-Befehle erhalten Homebrew und WinGet. Nur die getrennten
+  optionalen Aufrufe entfernen nachweislich neue, unveraenderte Paketmanager.
+  NuGet, PowerShell-Einrichtungsmodule, Apple-Entwicklerwerkzeuge und ausserhalb
+  von Homebrew installiertes Ghostscript bleiben erhalten. Keine vollstaendige
+  Ruecksetzung des Rechners auf einen Snapshot.
 - Eigene Dokumente und Vorlagen werden nicht zur Loeschung ausgewaehlt.
   Aenderungen innerhalb eines Programmordners verhindern dessen Entfernung.
   Ein nativer Hersteller-Uninstaller entfernt seine eigenen Programmdateien.
@@ -99,12 +135,16 @@ pwsh -NoProfile -File test-tracking.ps1 : PowerShell-Zustandsmaschine mit Mocks
 pwsh -NoProfile -File test-updates.ps1 : MiKTeX-Erkennung und Updatefolge mit Mocks
 node test-entrypoints.mjs  : Linux-Einstieg und PDF-Befehle mit Download-Mocks
 pwsh -NoProfile -File test-entrypoints.ps1 : kurzer Windows-Einstieg mit Mocks
+node test-managers.mjs : getrennte Homebrew-Herkunft und Entfernung (Bash/zsh)
+pwsh -NoProfile -File test-managers.ps1 : WinGet-Herkunft und Appx-Entfernung
 Keine echten Installationen oder Deinstallationen durch diese Tests.
 Native End-to-End-Tests auf Windows und Linux stehen weiterhin aus.
 
 Quellen
 -------
 https://docs.brew.sh/Manpage
+https://github.com/Homebrew/install/blob/main/README.md
+https://learn.microsoft.com/en-us/powershell/module/appx/remove-appxpackage
 https://github.com/Homebrew/homebrew-cask/blob/HEAD/Casks/m/mactex.rb
 https://www.tug.org/mactex/uninstalling.html
 https://learn.microsoft.com/en-us/windows/package-manager/winget/
