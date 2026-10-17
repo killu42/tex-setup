@@ -138,7 +138,23 @@ pwsh -NoProfile -File test-entrypoints.ps1 : kurzer Windows-Einstieg mit Mocks
 node test-managers.mjs : getrennte Homebrew-Herkunft und Entfernung (Bash/zsh)
 pwsh -NoProfile -File test-managers.ps1 : WinGet-Herkunft und Appx-Entfernung
 Keine echten Installationen oder Deinstallationen durch diese Tests.
-Native End-to-End-Tests auf Windows und Linux stehen weiterhin aus.
+
+Native Windows-Praxistests seit 2026-10-17:
+Manuell ueber Actions > Windows-Praxistest; keine automatischen Zeitplaene.
+test-windows-native.ps1 laeuft ausschliesslich auf wegwerfbaren, von GitHub
+gehosteten Windows-VMs dieses Repositorys, niemals auf privaten Rechnern.
+Windows Server 2025 x64 und Windows 11 ARM, jeweils neue/vorhandene MiKTeX-
+Installation. Echte Installation, Updates, PDF-Erzeugung und Entfernung;
+zusaetzlich Schutz vorhandener Programme und einer eigenen TeX-Datei.
+Ergebnisse und noch offene Fehler:
+https://github.com/killu42/tex-setup/actions/runs/39018334237
+Aktuelle Produktionsfassung NICHT vollstaendig bestanden: Der normale
+pdfLaTeX-Start aendert miktex/lock; die Metadatenpruefung blockiert danach
+bei einer eigenen Neuinstallation weitere Aufrufe. Nicht als Freigabe werten.
+Die Test-VMs haben einen geschuetzten, vorinstallierten App-Installer. Der
+Zusatzfall manager-new kann deshalb dort nicht vorbereitet werden; keine
+Umgehung von Windows-Schutz, keine native Bestaetigung dieser Entfernungsroute.
+Native Linux-Tests und GUI-Bedienung sind weiterhin nicht abgedeckt.
 
 Quellen
 -------
