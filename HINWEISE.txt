@@ -36,6 +36,22 @@ Bei selbst neu installiertem MiKTeX wird der Nachweis erst nach erfolgreichem
 Update erneuert. Spaeter ausserhalb dieses Aufrufs veraenderte Installationen
 werden nicht nachtraeglich uebernommen. Fehler bleiben als unvollstaendig markiert.
 
+Automatische lokale Zustandspruefung
+-----------------------------------
+Install-TeX liest state.json automatisch und vergleicht den Nachweis mit der
+lokalen MiKTeX-Registrierung und, soweit vorhanden, dem Dateiinventar. Vor dem
+WinGet-Bootstrap wird angezeigt, ob eine Neuinstallation, ein geschuetzter
+Bestand, eine eigene vollstaendig erfasste Installation oder ein geschuetzter
+Altfall vorliegt. Widerspruechliche, unbekannte oder unvollstaendige Nachweise
+stoppen den Aufruf. Diese Auswertung ist schreibfrei und uebertraegt keine
+Dateien; Benutzer muessen state.json weder oeffnen noch verschicken.
+Die Pruefung ersetzt KEINE fehlenden historischen Angaben. Bei geschuetzten
+Altfaellen kann die Reparatur gelingen, ohne die automatische Deinstallation
+freizugeben. Es werden keine Sicherungskopien angelegt und keine zusaetzlichen
+Dateien oder Programme zur Entfernung freigegeben. PDF-Befehle unveraendert.
+47 isolierte Tracking-Pruefungen einschliesslich 13 neuer Auswertungsfaelle
+bestanden; die weiteren bestehenden Tests und ihre Grenzen siehe unten.
+
 TeXworks und Wiederholungsaufrufe
 ------------------------------
 Nach Installation/Update wird miktex-texworks.exe in derselben registrierten
