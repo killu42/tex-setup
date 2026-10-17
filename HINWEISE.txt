@@ -36,6 +36,45 @@ Bei selbst neu installiertem MiKTeX wird der Nachweis erst nach erfolgreichem
 Update erneuert. Spaeter ausserhalb dieses Aufrufs veraenderte Installationen
 werden nicht nachtraeglich uebernommen. Fehler bleiben als unvollstaendig markiert.
 
+TeXworks und Wiederholungsaufrufe
+------------------------------
+Nach Installation/Update wird miktex-texworks.exe in derselben registrierten
+MiKTeX-Installation geprueft. Fehlt es, wird das passende offizielle MiKTeX-
+Editorpaket nachinstalliert. Eine vorhandene passende Startmenue-Verknuepfung
+wird wiederverwendet, auch im Unterordner MiKTeX oder im gemeinsamen Startmenue.
+Fehlt sie, entsteht ein neuer Link im Startmenue des aktuellen Kontos.
+Fremde gleichnamige Links werden nie ueberschrieben. Die zusaetzlich angelegten
+Links werden nur zusammen mit eigenem neuem MiKTeX und bei passendem Hash
+entfernt. Bei vorher vorhandenem MiKTeX bleibt auch dessen reparierter Link.
+Beide Windows-Zeilen aus der PDF erneut ausfuehren, nicht nur winget install.
+Die erste Zeile laedt die aktuelle Reparatur; eine neue PDF ist dafuer unnoetig.
+
+Inventarversion 2 ignoriert Zeitstempel von Verzeichnissen und der ein Byte
+grossen Laufzeitdatei miktex/lock. Dateinamen, Laengen, andere Dateizeitstempel
+und Links bleiben geprueft. Normale Compiler-/Editorstarts sollen die spaetere
+Wiederholung und Entfernung damit nicht faelschlich blockieren.
+Alte Protokolle ohne Nachweis der urspruenglichen MiKTeX-Datenordner werden
+nicht nachtraeglich zur automatischen Loeschung berechtigt. Die eindeutig
+identifizierte Installation kann aktualisiert/repariert werden, wird aber als
+vorhanden geschuetzt und danach NICHT automatisch deinstalliert. Dasselbe gilt
+bei einem abweichenden alten Sammel-Hash. Neuinstallationen mit vollstaendigem
+aktuellem Nachweis behalten ihre Herkunft auch nach wiederholten Aufrufen.
+Ein unbekannter/unterbrochener oder widerspruechlicher Zustand bleibt gesperrt.
+
+Zur unbeaufsichtigten Entfernung wird der integrierte Hersteller-Uninstaller
+miktexsetup.exe --verbose --shared=no uninstall aus der nachgewiesenen
+Benutzerinstallation verwendet. WinGet uninstall startet bei diesem Paket
+nur die grafische MiKTeX-Console-Bereinigung und kann auf eine Eingabe warten.
+Kein systemweites Uninstall, keine fremde PATH-Kopie, keine eigenen pauschalen
+Loeschbefehle. Erfolg wird anhand fehlender Programmregistrierung nachgeprueft.
+Vor der Entfernung muss initexmf --report ausschliesslich die erwarteten
+MiKTeX-Standardordner als UserInstall/UserConfig/UserData melden. Andere Pfade,
+fehlende Angaben oder Links sperren die Entfernung. Schon vor der Einrichtung
+vorhandene MiKTeX-Datenordner werden nicht als eigene Neuinstallation behandelt.
+Der Hersteller-Uninstaller entfernt bei einer nachgewiesenen Neuinstallation
+auch deren MiKTeX-Einstellungen und Cache. Eigene Projektordner ausserhalb
+dieser Programm-/Datenordner werden nicht zur Entfernung ausgewaehlt.
+
 Lokale Ablage und Datenschutz
 ----------------------------
 Mac:     ~/Library/Application Support/TeX-Setup/
@@ -133,6 +172,7 @@ node test-setup.mjs        : bestehende Bootstrap-Pruefungen
 node test-tracking.mjs     : Bash/zsh mit isolierten Paketmanager-/sudo-Mocks
 pwsh -NoProfile -File test-tracking.ps1 : PowerShell-Zustandsmaschine mit Mocks
 pwsh -NoProfile -File test-updates.ps1 : MiKTeX-Erkennung und Updatefolge mit Mocks
+pwsh -NoProfile -File test-editors.ps1 : Editorpaket und Startmenue-Links mit Mocks
 node test-entrypoints.mjs  : Linux-Einstieg und PDF-Befehle mit Download-Mocks
 pwsh -NoProfile -File test-entrypoints.ps1 : kurzer Windows-Einstieg mit Mocks
 node test-managers.mjs : getrennte Homebrew-Herkunft und Entfernung (Bash/zsh)
@@ -143,20 +183,34 @@ Native Windows-Praxistests seit 2026-10-17:
 Manuell ueber Actions > Windows-Praxistest; keine automatischen Zeitplaene.
 test-windows-native.ps1 laeuft ausschliesslich auf wegwerfbaren, von GitHub
 gehosteten Windows-VMs dieses Repositorys, niemals auf privaten Rechnern.
-Windows Server 2025 x64 und Windows 11 ARM, jeweils neue/vorhandene MiKTeX-
-Installation. Echte Installation, Updates, PDF-Erzeugung und Entfernung;
-zusaetzlich Schutz vorhandener Programme und einer eigenen TeX-Datei.
-Ergebnisse und noch offene Fehler:
-https://github.com/killu42/tex-setup/actions/runs/39018334237
-Aktuelle Produktionsfassung NICHT vollstaendig bestanden: Wiederholte
-Einrichtung und Entfernung neuer MiKTeX-Installationen werden nach normaler
-Nutzung von der Schutzpruefung blockiert. In einem Bestandsfall aenderte
-pdfLaTeX die Datei miktex/lock; die genaue Abweichung der Neuinstallationen
-ist noch nicht abschliessend erklaert. Nicht als Freigabe werten.
+Windows Server 2025 x64 und Windows 11 ARM, jeweils Neuinstallation, vorhandenes
+MiKTeX und Uebernahme einer echten Installation mit der alten Skriptfassung.
+Echte Installation, Updates, Reparatur eines gezielt entfernten Startmenue-Links,
+Editorstart, PDF-Erzeugung, Wiederholungsaufruf und Entfernung; zusaetzlich Schutz
+vorhandener Programme und einer eigenen TeX-Datei. Keine Installation auf dem
+privaten Rechner fuer diesen Test.
+234 isolierte Tests bestanden. Nativer Teststand der Implementierung e06a06b:
+https://github.com/killu42/tex-setup/actions/runs/39020626829
+Nach einmaliger Wiederholung der Downloadfehler 5/6 Faelle bestanden: x64
+existing/legacy sowie ARM fresh/existing/legacy. x64 fresh scheiterte in beiden
+Versuchen an einem MiKTeX-Server-Timeout beim Update. Dies ist KEIN bestandener
+Test und keine vollstaendige Freigabe fuer jede Windows-Konfiguration.
+Im vorigen Kandidaten b3156d3 bestand auch x64 fresh einschliesslich Entfernung:
+https://github.com/killu42/tex-setup/actions/runs/39019877126
+Die danach hinzugefuegte Datenordner-Schutzpruefung ist mit echten Windows-
+Ordnern auf ARM und in isolierten Negativtests bestanden. Sie kann unklare
+Entfernungen verweigern, erweitert aber nicht deren Ziele.
+Ein abgebrochener Installations-/Updatelauf bleibt bewusst als unvollstaendig
+gesperrt. Erneute Eingabe ist deshalb keine universelle Reparatur jedes Fehlers;
+die Wiederholungstests beziehen sich auf erfolgreich abgeschlossene Aufrufe.
 Die Test-VMs haben einen geschuetzten, vorinstallierten App-Installer. Der
 Zusatzfall manager-new kann deshalb dort nicht vorbereitet werden; keine
 Umgehung von Windows-Schutz, keine native Bestaetigung dieser Entfernungsroute.
-Native Linux-Tests und GUI-Bedienung sind weiterhin nicht abgedeckt.
+Mac: offizieller mactex-Cask enthaelt die GUI-Programme einschliesslich TeXShop
+unter Programme/TeX. Linux: Paketliste enthaelt texstudio samt Desktop-Eintrag.
+Paketinhalt und Shell-Aufrufe geprueft, kein nativer Mac-/Linux-End-to-End-Test.
+Interaktive Bearbeitung im Editor und jede private Rechnerkonfiguration sind
+auch durch die Windows-Matrix nicht abgedeckt.
 
 Quellen
 -------
@@ -170,6 +224,11 @@ https://learn.microsoft.com/en-us/windows/package-manager/winget/uninstall
 https://miktex.org/faq
 https://docs.miktex.org/manual/miktex.html
 https://docs.miktex.org/manual/miktex-packages.html
+https://docs.miktex.org/manual/miktexsetup.html
+https://miktex.org/about
+https://miktex.org/packages/miktex-texworks-bin-x64-2.9
+https://tug.org/mactex/mactex-download.html
+https://packages.debian.org/trixie/amd64/texstudio/filelist
 https://github.com/microsoft/winget-pkgs/blob/master/manifests/m/MiKTeX/MiKTeX/25.12/MiKTeX.MiKTeX.installer.yaml
 https://manpages.debian.org/bookworm/apt/apt-get.8.en.html
 https://manpages.debian.org/bookworm/dpkg/dpkg.1.en.html
