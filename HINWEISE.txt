@@ -148,9 +148,11 @@ Installation. Echte Installation, Updates, PDF-Erzeugung und Entfernung;
 zusaetzlich Schutz vorhandener Programme und einer eigenen TeX-Datei.
 Ergebnisse und noch offene Fehler:
 https://github.com/killu42/tex-setup/actions/runs/39018334237
-Aktuelle Produktionsfassung NICHT vollstaendig bestanden: Der normale
-pdfLaTeX-Start aendert miktex/lock; die Metadatenpruefung blockiert danach
-bei einer eigenen Neuinstallation weitere Aufrufe. Nicht als Freigabe werten.
+Aktuelle Produktionsfassung NICHT vollstaendig bestanden: Wiederholte
+Einrichtung und Entfernung neuer MiKTeX-Installationen werden nach normaler
+Nutzung von der Schutzpruefung blockiert. In einem Bestandsfall aenderte
+pdfLaTeX die Datei miktex/lock; die genaue Abweichung der Neuinstallationen
+ist noch nicht abschliessend erklaert. Nicht als Freigabe werten.
 Die Test-VMs haben einen geschuetzten, vorinstallierten App-Installer. Der
 Zusatzfall manager-new kann deshalb dort nicht vorbereitet werden; keine
 Umgehung von Windows-Schutz, keine native Bestaetigung dieser Entfernungsroute.
