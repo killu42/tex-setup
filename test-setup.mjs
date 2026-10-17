@@ -60,9 +60,12 @@ check('Windows bootstrap exposes validated executable, no distro install',()=>{
   assert.match(win,/Get-AppxPackage Microsoft.DesktopAppInstaller/);
   assert.match(win,/\$env:Path = \(Split-Path -Parent \$wg\)/);
   assert.match(win,/\$LASTEXITCODE -ne 0/);
-  assert.doesNotMatch(win,/MiKTeX|Set-ExecutionPolicy|Bypass|winget install/);
+  assert.doesNotMatch(win,/Set-ExecutionPolicy|Bypass/);
+  assert.match(win,/function Update-TeX/);
+  assert.match(win,/packages','update'/);
+  assert.match(win,/TeXworks\.lnk/);
 });
-check('No distribution operations or private data in either bootstrap',()=>{
-  for(const s of [mac,win]) assert.doesNotMatch(s,/mactex|miktex|tlmgr|texstudio|apt-get|\/Users\/|champcademy|ghp_|github_pat_|rm -rf|--zap/i);
+check('No setup history, deletion code or private data in installation helpers',()=>{
+  for(const s of [mac,win]) assert.doesNotMatch(s,/state\.json|track\.|\/Users\/|champcademy|ghp_|github_pat_|rm -rf|--zap/i);
 });
 console.log(count+' checks passed; no real package installation, no Windows runtime test.');

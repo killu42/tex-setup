@@ -1,5 +1,57 @@
 # Make winget available in the current PowerShell after successful setup.
-# Only WinGet is installed/updated here, never a TeX distribution.
+# Loading only prepares WinGet; Update-TeX runs after the explicit winget install.
+function Update-TeX {
+    # --no-upgrade leaves existing MiKTeX to its own updater, including core updates.
+    $installExit = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
+    $PSNativeCommandUseErrorActionPreference = $false
+    if ($null -eq $installExit -or $installExit -notin @(0, -1978335135, -1978335189)) {
+        throw "MiKTeX-Installation fehlgeschlagen ($installExit)."
+    }
+    $apps = @(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' |
+        Where-Object DisplayName -Like '*MiKTeX*')
+    if ($apps.Count -ne 1) { throw 'Keine eindeutige MiKTeX-Benutzerinstallation gefunden.' }
+    $root = $apps[0].InstallLocation
+    if (-not $root) { $root = Join-Path $env:LOCALAPPDATA 'Programs\MiKTeX' }
+    $files = @('miktex\bin\x64\miktex.exe','miktex\bin\miktex.exe' |
+        ForEach-Object { Join-Path $root $_ } | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+    if ($files.Count -ne 1) { throw 'MiKTeX-Updater fehlt oder ist nicht eindeutig.' }
+    $miktex = $files[0]
+    $bin = Split-Path -Parent $miktex
+    function Invoke-MiKTeX([string[]]$Arguments) {
+        & $miktex @Arguments | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw "MiKTeX fehlgeschlagen: $Arguments ($LASTEXITCODE)." }
+    }
+    for ($pass = 0; $pass -lt 3; $pass++) {
+        Invoke-MiKTeX @('packages','update-package-database')
+        Invoke-MiKTeX @('packages','update')
+        & $miktex packages check-update | Out-Host
+        if ($LASTEXITCODE -eq 0) { break }
+        if ($LASTEXITCODE -ne 100 -or $pass -eq 2) { throw 'MiKTeX-Updates nicht abgeschlossen.' }
+    }
+    $editor = Join-Path $bin 'miktex-texworks.exe'
+    if (-not (Test-Path -LiteralPath $editor -PathType Leaf)) {
+        $package = if ((Split-Path -Leaf $bin) -eq 'x64') { 'miktex-texworks-bin-x64-2.9' } else { 'miktex-texworks-bin-2.9' }
+        Invoke-MiKTeX @('packages','install',$package)
+    }
+    if (-not (Test-Path -LiteralPath $editor -PathType Leaf)) { throw 'TeXworks fehlt nach der Reparatur.' }
+    # Use MiKTeX's own Start-menu folder, which its uninstaller already manages.
+    $folder = Join-Path ([Environment]::GetFolderPath('Programs')) 'MiKTeX'
+    [void][IO.Directory]::CreateDirectory($folder)
+    $path = Join-Path $folder 'TeXworks.lnk'
+    $shell = New-Object -ComObject WScript.Shell
+    $link = $shell.CreateShortcut($path)
+    if ((Test-Path -LiteralPath $path) -and $link.TargetPath -ine $editor) {
+        throw 'Eine andere TeXworks-Verknuepfung bleibt unveraendert.'
+    }
+    $link.TargetPath = $editor
+    $link.WorkingDirectory = [Environment]::GetFolderPath('MyDocuments')
+    $link.Save()
+    if ($shell.CreateShortcut($path).TargetPath -ine $editor) { throw 'Startmenue-Eintrag fehlt.' }
+    $env:Path = $bin + ';' + $env:Path
+    $global:LASTEXITCODE = 0
+    Write-Host 'MiKTeX aktualisiert; TeXworks ist im Startmenue bereit.'
+}
 function Install-TeXWinGetRelease {
     param([string]$Architecture = [Environment]::GetEnvironmentVariable('PROCESSOR_ARCHITECTURE','Machine'))
     # Local only: PowerShell 5's per-chunk progress rendering slows large files.

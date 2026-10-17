@@ -1,0 +1,47 @@
+name: PDF lifecycle
+on:
+  push:
+    paths: ['mac.sh', 'win.ps1', 'pdf-commands.json', 'test-pdf-*', '.github/workflows/lifecycle.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, windows-11-arm]
+        scenario: [fresh, legacy]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - shell: powershell
+        run: ./test-pdf-windows.ps1 -Scenario ${{ matrix.scenario }}
+  unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+          - os: macos-15
+            platform: mac
+          - os: macos-15-intel
+            platform: intel
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - shell: bash
+        env:
+          TEST_REF: ${{ github.sha }}
+          TEST_PLATFORM: ${{ matrix.platform }}
+          NONINTERACTIVE: '1'
+          HOMEBREW_NO_ANALYTICS: '1'
+          DEBIAN_FRONTEND: noninteractive
+        run: bash test-pdf-unix.sh

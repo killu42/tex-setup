@@ -1,5 +1,12 @@
 # Source this script in the current shell so Homebrew is available immediately.
-# Only Homebrew is installed/updated here, never a TeX distribution.
+# Loading only prepares Homebrew; tex_update is explicitly called after brew install.
+tex_update() {
+  if [ ! -x /Library/TeX/texbin/tlmgr ] ||
+     [ ! -x /Applications/TeX/TeXShop.app/Contents/MacOS/TeXShop ]; then
+    brew reinstall --cask mactex || return
+  fi
+  sudo /Library/TeX/texbin/tlmgr update --self --all
+}
 tex_setup_homebrew() {
   local tex_brew tex_installer tex_env
   if [ "$(uname -s)" != Darwin ]; then
