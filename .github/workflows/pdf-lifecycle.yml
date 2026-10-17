@@ -15,7 +15,9 @@ jobs:
     timeout-minutes: 35
     steps:
       - name: Real Windows 11 fresh user without initial WinGet
-        shell: powershell
+        # The fixture uses Start-Process -UseNewEnvironment, broken in Windows PowerShell 5.1.
+        # The student's exact commands still execute in Windows PowerShell 5.1 in the child.
+        shell: pwsh
         env:
           TEST_REF: ${{ github.sha }}
         run: |
