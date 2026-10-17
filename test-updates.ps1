@@ -9,6 +9,7 @@ $script:count = 0
 function Assert($Condition, $Message='Assertion failed') { if (-not $Condition) { throw $Message } }
 function Throws([scriptblock]$Action) { $caught=$false; try { & $Action } catch { $caught=$true }; Assert $caught 'Expected rejection' }
 function Test-TeXAdministrator { $script:admin }
+function Get-TeXRegistrations { $script:app }
 function Get-TeXInstallRoot { $script:installRoot }
 function Invoke-TeXNative([string]$File, [string[]]$Arguments) {
     $script:calls.Add([pscustomobject]@{File=$File;Arguments=$Arguments})
@@ -123,4 +124,24 @@ Case 'native adapter exposes errors rather than reporting success' {
     Assert ((& $nativeInvoke $engine @('-NoProfile','-Command','exit 9')) -eq 9)
     Throws { & $nativeInvoke (Join-Path $root 'missing-command') @() }
 }
-Write-Host "$script:count isolated updater checks passed. No native Windows update test."
+Case 'uninstall uses registered integrated vendor tool in current-user mode' {
+    $setup=Join-Path (Split-Path -Parent $script:exe) 'miktexsetup.exe'
+    Set-Content -LiteralPath $setup -Value 'mock only - never executed'
+    Codes @(0); Invoke-TeXUninstall
+    Assert ($script:calls.Count -eq 1); Assert ($script:calls[0].File -eq $setup)
+    Assert (($script:calls[0].Arguments -join ' ') -eq '--verbose --shared=no uninstall')
+}
+Case 'missing integrated uninstaller fails without fallback or deletion' {
+    Throws { Invoke-TeXUninstall }; Assert ($script:calls.Count -eq 0)
+}
+Case 'shared installation never uninstalled automatically' {
+    $script:admin=$true; $script:app.Key='HKEY_LOCAL_MACHINE\Software\MiKTeX'
+    Throws { Invoke-TeXUninstall }; Assert ($script:calls.Count -eq 0)
+}
+Case 'uninstaller failure or missing exit code retains failure' {
+    $setup=Join-Path (Split-Path -Parent $script:exe) 'miktexsetup.exe'
+    Set-Content -LiteralPath $setup -Value 'mock only - never executed'
+    Codes @(9); Throws { Invoke-TeXUninstall }
+    $script:codes.Enqueue($null); Throws { Invoke-TeXUninstall }
+}
+Write-Host "$script:count isolated updater/uninstaller checks passed. No native Windows update test."

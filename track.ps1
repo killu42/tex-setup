@@ -439,9 +439,15 @@ function Install-TeX([scriptblock]$Command) {
     }
 }
 function Invoke-TeXUninstall {
-    $wg = Get-Command winget.exe -ErrorAction Stop
-    & $wg.Source uninstall --id MiKTeX.MiKTeX -e --scope user -s winget --disable-interactivity
-    if ($LASTEXITCODE -ne 0) { throw "MiKTeX-Deinstallation fehlgeschlagen ($LASTEXITCODE)." }
+    # WinGet's registered uninstall command only opens MiKTeX Console's GUI.
+    # Use the integrated vendor utility from the already verified installation.
+    $updater = Get-TeXUpdater @(Get-TeXRegistrations)
+    if ($updater.Admin) { throw 'Keine automatische Entfernung systemweiter Installationen.' }
+    $uninstaller = Join-Path (Split-Path -Parent $updater.File) 'miktexsetup.exe'
+    if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw 'MiKTeX-Uninstaller fehlt. Nichts entfernt.' }
+    Assert-TeXPlainPath $uninstaller
+    $code = Invoke-TeXNative $uninstaller @('--verbose','--shared=no','uninstall')
+    if ($null -eq $code -or $code -ne 0) { throw "MiKTeX-Deinstallation fehlgeschlagen ($code)." }
 }
 function Remove-TeX {
     Use-TeXRecord -ExistingOnly -Action {
