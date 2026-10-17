@@ -51,8 +51,11 @@ jobs:
             pdflatex -interaction=nonstopmode -halt-on-error -output-directory="$work" "$work/keep.tex"
             bash -c "$setup" -- remove
             bash -c "$setup" -- remove
-            ! command -v texstudio
-            ! command -v pdflatex
+            hash -r
+            if command -v texstudio || command -v pdflatex; then
+              echo 'FAIL: TeX executable remains' >&2
+              exit 1
+            fi
             apt-get --version
           fi
           test -s "$work/keep.pdf"
