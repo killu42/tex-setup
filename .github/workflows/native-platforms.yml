@@ -1,11 +1,13 @@
 name: Native Plattformtests
 on:
   pull_request:
+    types: [opened, reopened]
     paths:
       - '*.sh'
       - '*.ps1'
       - '.github/workflows/native-platforms.yml'
   workflow_dispatch:
+  workflow_call:
 permissions: {}
 jobs:
   unix:
@@ -43,6 +45,9 @@ jobs:
       matrix:
         os: [windows-2025, windows-11-arm]
         scenario: [fresh, existing, legacy]
+        include:
+          - os: windows-2022
+            scenario: manager-new
     steps:
       - name: Real install, editor, PDF, repeat and removal
         shell: powershell
