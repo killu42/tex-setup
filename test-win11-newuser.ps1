@@ -71,11 +71,13 @@ Check ((Get-FileHash $doc).Hash -eq $hash) 'Own document retained'
 Write-Host 'PASS complete Windows 11 fresh-user lifecycle without initial WinGet'
 '@
 $child = $child.Replace('__SID__',$user.SID.Value).Replace('__NAME__',$name).Replace('__REF__',$env:TEST_REF)
-$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes("try {`n" + $child + "`nexit 0`n} catch { Write-Error (`$_ | Out-String) -ErrorAction Continue; exit 1 }"))
+$childFile = Join-Path $work 'fresh-user-test.ps1'
+("try {`n" + $child + "`nexit 0`n} catch { Write-Error (`$_ | Out-String) -ErrorAction Continue; exit 1 }") | Set-Content -LiteralPath $childFile -Encoding UTF8
 $process = $null
 try {
     $credential = [pscredential]::new("$env:COMPUTERNAME\$name",$password)
-    $process = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',$encoded) -Credential $credential -LoadUserProfile -UseNewEnvironment -WorkingDirectory $work -PassThru -RedirectStandardOutput (Join-Path $work 'stdout.txt') -RedirectStandardError (Join-Path $work 'stderr.txt')
+    # CreateProcessWithLogonW limits command-line length; keep the test body in its own file.
+    $process = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-File',('"'+$childFile+'"')) -Credential $credential -LoadUserProfile -UseNewEnvironment -WorkingDirectory $work -PassThru -RedirectStandardOutput (Join-Path $work 'stdout.txt') -RedirectStandardError (Join-Path $work 'stderr.txt')
     $offset = 0
     $deadline = [DateTime]::UtcNow.AddMinutes(30)
     do {
