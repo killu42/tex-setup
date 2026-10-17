@@ -67,7 +67,10 @@ do {
         }
     }
     Start-Sleep 2
-} while ((Test-Path $editor) -and [DateTime]::UtcNow -lt $deadline)
+    $remaining=@(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' |
+        Where-Object DisplayName -Like '*MiKTeX*')
+    $removed= -not (Test-Path $editor) -and -not (Test-Path $link) -and $remaining.Count -eq 0
+} while (-not $removed -and [DateTime]::UtcNow -lt $deadline)
 Check (-not (Test-Path $editor)) 'Exact winget removal removes editor'
 Check (-not (Test-Path $link)) 'Removal also removes repaired shortcut'
 $apps=@(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' | Where-Object DisplayName -Like '*MiKTeX*')

@@ -1,12 +1,18 @@
 name: PDF lifecycle
 on:
   push:
-    paths: ['mac.sh', 'win.ps1', 'pdf-commands.json', 'test-pdf-*', '.github/workflows/lifecycle.yml']
+    paths: ['mac.sh', 'win.ps1']
   workflow_dispatch:
+    inputs:
+      linux_only:
+        type: boolean
+        default: false
+        description: Nur Linux (z.B. nach einer Linux-Befehlsaenderung)
 permissions:
   contents: read
 jobs:
   windows:
+    if: ${{ !inputs.linux_only }}
     strategy:
       fail-fast: false
       matrix:
@@ -24,13 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-24.04
-            platform: linux
-          - os: macos-15
-            platform: mac
-          - os: macos-15-intel
-            platform: intel
+        os: ${{ inputs.linux_only && fromJSON('["ubuntu-24.04"]') || fromJSON('["ubuntu-24.04","macos-15","macos-15-intel"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 50
     steps:
@@ -40,7 +40,7 @@ jobs:
       - shell: bash
         env:
           TEST_REF: ${{ github.sha }}
-          TEST_PLATFORM: ${{ matrix.platform }}
+          TEST_PLATFORM: ${{ matrix.os == 'ubuntu-24.04' && 'linux' || matrix.os == 'macos-15-intel' && 'intel' || 'mac' }}
           NONINTERACTIVE: '1'
           HOMEBREW_NO_ANALYTICS: '1'
           DEBIAN_FRONTEND: noninteractive

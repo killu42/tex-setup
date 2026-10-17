@@ -20,3 +20,5 @@ jobs:
       - uses: actions/checkout@v4
       - shell: powershell
         run: ./test-winget-bootstrap.ps1
+      - shell: powershell
+        run: ./test-update.ps1

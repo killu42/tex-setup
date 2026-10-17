@@ -5,6 +5,6 @@
   "windows": "irm https://raw.githubusercontent.com/killu42/tex-setup/main/win.ps1 | iex\nwinget install --id MiKTeX.MiKTeX -e --scope user -s winget --no-upgrade; Update-TeX",
   "mac_remove": "HOMEBREW_NO_AUTOREMOVE=1 brew uninstall --cask mactex",
   "intel_remove": "sudo /Library/TeX/texbin/tlmgr uninstall --all --force &&\nsudo rm -rf /Applications/TeX/TeXShop.app",
-  "linux_remove": "sudo apt remove '~n^texlive' '~n^texstudio' biber latexmk",
+  "linux_remove": "sudo apt remove \"~n^texlive\" \"~n^texstudio\" biber latexmk",
   "windows_remove": "winget uninstall --id MiKTeX.MiKTeX -e --scope user -s winget"
 }
