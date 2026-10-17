@@ -13,7 +13,7 @@ case "${1:-}" in
     tex_inventory=$(dpkg-query -W '-f=${binary:Package}\t${db:Status-Abbrev}\n')
     tex_packages=()
     while read -r tex_name tex_status; do
-      if [[ "$tex_status" = ii && "$tex_name" =~ ^(texlive(-[a-z0-9+.-]+)?|biber|latexmk|texstudio)(:[a-z0-9-]+)?$ ]]; then
+      if [[ "$tex_status" = ii && "$tex_name" =~ ^(texlive(-[a-z0-9+.-]+)?|biber|latexmk|tipa|texstudio(-doc|-l10n)?)(:[a-z0-9-]+)?$ ]]; then
         tex_packages+=("$tex_name")
       fi
     done <<< "$tex_inventory"

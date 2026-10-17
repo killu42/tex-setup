@@ -29,6 +29,7 @@ test('Linux no installed TeX is harmless','Linux',{inventory:'git ii\ntexstudio 
 test('Linux install uses explicit package list and no state','Linux',{action:'install'},(r,l)=>{assert.equal(r.status,0);assert.match(l,/apt-get install -y texlive-latex-extra/);});
 test('Linux failed simulation never uninstalls','Linux',{inventory:'texlive-base ii',fail:true},(r,l)=>{assert.notEqual(r.status,0);assert.doesNotMatch(l,/sudo/);});
 test('Linux invalid action does nothing','Linux',{action:'bad'},(r,l)=>{assert.equal(r.status,2);assert.equal(l,'');});
+test('Linux includes bundled TeX fonts and editor support packages','Linux',{inventory:'texlive-base ii\ntipa ii\ntexstudio ii\ntexstudio-doc ii\ntexstudio-l10n ii',plan:'Remv texlive-base [1]\nRemv tipa [1]\nRemv texstudio [1]\nRemv texstudio-doc [1]\nRemv texstudio-l10n [1]'},(r,l)=>{assert.equal(r.status,0);assert.match(l,/sudo apt-get remove -y -- texlive-base tipa texstudio texstudio-doc texstudio-l10n/);});
 for(const name of ['mac-remove.sh','linux.sh','windows.ps1','remove.ps1']) {
  const s=readFileSync(join(here,name),'utf8');
  assert.doesNotMatch(s,/Save-TeXRecord|Use-TeXRecord|state\.json|Remove-AppxPackage|tex_remove_manager/);
