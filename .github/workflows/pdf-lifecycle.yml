@@ -4,11 +4,24 @@ on:
     inputs:
       mode:
         type: choice
-        options: [all, mac, bootstrap]
+        options: [all, mac, bootstrap, win11-newuser]
         default: all
-        description: Full matrix, focused Mac recheck, or missing Homebrew
+        description: Full matrix, Mac, missing Homebrew, or fresh Windows 11 user
 permissions: {}
 jobs:
+  win11-newuser:
+    if: inputs.mode == 'win11-newuser'
+    runs-on: windows-11-arm
+    timeout-minutes: 35
+    steps:
+      - name: Real Windows 11 fresh user without initial WinGet
+        shell: powershell
+        env:
+          TEST_REF: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $test=Invoke-RestMethod "https://raw.githubusercontent.com/killu42/tex-setup/$env:TEST_REF/test-win11-newuser.ps1"
+          & ([scriptblock]::Create($test))
   windows:
     if: inputs.mode == 'all'
     strategy:
