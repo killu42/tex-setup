@@ -9,13 +9,13 @@ on:
   workflow_dispatch:
   workflow_call:
     inputs:
-      managers_only:
-        type: boolean
-        default: false
+      suite:
+        type: string
+        default: all
 permissions: {}
 jobs:
   unix:
-    if: ${{ !inputs.managers_only }}
+    if: ${{ inputs.suite == '' || inputs.suite == 'all' || inputs.suite == 'unix' }}
     name: ${{ matrix.os }} - ${{ matrix.scenario }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
@@ -42,7 +42,7 @@ jobs:
           script=$(curl -fsSL --retry 3 "https://raw.githubusercontent.com/killu42/tex-setup/$TEST_REF/test-unix-native.sh")
           bash -c "$script"
   windows:
-    if: ${{ !inputs.managers_only }}
+    if: ${{ inputs.suite == '' || inputs.suite == 'all' || inputs.suite == 'windows' }}
     name: ${{ matrix.os }} - ${{ matrix.scenario }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
@@ -66,6 +66,7 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($source)) { throw 'Empty test download' }
           & ([scriptblock]::Create($source)) -Scenario $env:TEST_SCENARIO
   mac-manager:
+    if: ${{ inputs.suite == '' || inputs.suite == 'all' || inputs.suite == 'mac-managers' }}
     name: ${{ matrix.os }} - missing Homebrew
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
