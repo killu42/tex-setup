@@ -33,8 +33,10 @@ public sealed class PublisherRefusalUI : PSHostUserInterface {
     public override PSHostRawUserInterface RawUI { get { return parent.RawUI; } }
     public override int PromptForChoice(string caption, string message, Collection<ChoiceDescription> choices, int defaultChoice) {
         if (!message.Contains("Microsoft.WinGet.Client") || !message.Contains("Format.ps1xml") ||
-            defaultChoice < 0 || !choices[defaultChoice].Label.Replace("&", "").Equals("Do not run", StringComparison.OrdinalIgnoreCase))
+            defaultChoice < 0 || !choices[defaultChoice].Label.Replace("&", "").Equals("Do not run", StringComparison.OrdinalIgnoreCase)) {
+            parent.WriteLine("TEST: unexpected prompt (not approved): " + message);
             throw new InvalidOperationException("Unexpected prompt: " + message);
+        }
         Denials++;
         parent.WriteLine("TEST: genuine publisher prompt declined (default): " + message);
         return defaultChoice;

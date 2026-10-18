@@ -18,6 +18,26 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Inspect Appx in the publisher test host
+        shell: powershell
+        run: |
+          Add-Type -Path ./test-publisher-host.cs
+          $h=New-Object PublisherRefusalHost($Host)
+          $old=Get-ExecutionPolicy -Scope Process
+          try {
+            foreach ($policy in @('RemoteSigned','AllSigned')) {
+              Set-ExecutionPolicy -Scope Process -ExecutionPolicy $policy -Force
+              $p=[powershell]::Create()
+              $p.Runspace=[runspacefactory]::CreateRunspace($h)
+              $p.Runspace.ApartmentState='STA'
+              $p.Runspace.Open()
+              [void]$p.AddScript('Import-Module Appx -Force -ErrorAction Stop; Get-Command Add-AppxPackage')
+              Write-Host "PROBE $policy"
+              try { $p.Invoke() | Out-Host } catch { Write-Host $_.Exception.ToString() }
+              $p.Streams.Error | Format-List * -Force | Out-Host
+              $p.Runspace.Dispose(); $p.Dispose()
+            }
+          } finally { Set-ExecutionPolicy -Scope Process -ExecutionPolicy $old -Force }
       - shell: powershell
         run: ./test-winget-bootstrap.ps1
       - shell: powershell
