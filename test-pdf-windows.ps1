@@ -37,6 +37,10 @@ if ($Scenario -eq 'publisher-refused') {
         $trusted=Join-Path $store $signature.SignerCertificate.Thumbprint
         Check (-not (Test-Path -LiteralPath $trusted)) 'Publisher not pre-trusted; certificate store unchanged'
     }
+    # Reproduce exactly the downloaded Format.ps1xml trust check. AllSigned
+    # additionally challenges unrelated, locally installed modules.
+    Set-Content -LiteralPath $format -Stream Zone.Identifier -Value @('[ZoneTransfer]','ZoneId=3') -Encoding ASCII
+    Check ((Get-Content -LiteralPath $format -Stream Zone.Identifier -Raw) -match 'ZoneId=3') 'Internet-zone marking on the reported format file'
     Add-Type -Path (Join-Path $PSScriptRoot 'test-publisher-host.cs')
     $refusalHost=New-Object PublisherRefusalHost($Host)
     $testShell=[powershell]::Create()
@@ -50,7 +54,7 @@ if ($Scenario -eq 'publisher-refused') {
     Check ($testShell.Streams.Error.Count -eq 0) 'Publisher-test prerequisites loaded'
     $testShell.Commands.Clear()
     $previousPolicy=Get-ExecutionPolicy -Scope Process
-    Set-ExecutionPolicy -Scope Process -ExecutionPolicy AllSigned -Force
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned -Force
 }
 try {
 for ($pass=1;$pass -le 2;$pass++) {
@@ -65,7 +69,7 @@ for ($pass=1;$pass -le 2;$pass++) {
         if ($testShell.Streams.Error.Count) { throw ($testShell.Streams.Error | Out-String) }
         $testShell.Commands.Clear()
         Check ($refusalHost.RefusalUI.Denials -ge $pass) "Actual Format.ps1xml publisher prompt declined, pass $pass"
-        Check ((Get-ExecutionPolicy -Scope Process) -eq 'AllSigned') "Security policy unchanged, pass $pass"
+        Check ((Get-ExecutionPolicy -Scope Process) -eq 'RemoteSigned') "Security policy unchanged, pass $pass"
         [void]$testShell.AddScript('(Get-Command Update-TeX).Definition')
         $definition=$testShell.Invoke()
         $testShell.Commands.Clear()
