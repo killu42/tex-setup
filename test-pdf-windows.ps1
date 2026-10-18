@@ -41,6 +41,9 @@ if ($Scenario -eq 'publisher-refused') {
     $refusalHost=New-Object PublisherRefusalHost($Host)
     $testShell=[powershell]::Create()
     $testShell.Runspace=[runspacefactory]::CreateRunspace($refusalHost)
+    # Match Windows PowerShell's normal STA console for Windows Appx/COM.
+    $testShell.Runspace.ApartmentState='STA'
+    $testShell.Runspace.ThreadOptions='ReuseThread'
     $testShell.Runspace.Open()
     [void]$testShell.AddScript('Import-Module PackageManagement; Import-Module PowerShellGet')
     [void]$testShell.Invoke()
