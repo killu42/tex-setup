@@ -1,5 +1,5 @@
 # Real lifecycle test. Never run on a private workstation.
-param([ValidateSet('fresh','legacy')][string]$Scenario='fresh')
+param([ValidateSet('fresh','legacy','publisher-refused')][string]$Scenario='fresh')
 $ErrorActionPreference='Stop'
 if ($env:OS -ne 'Windows_NT' -or $env:GITHUB_ACTIONS -ne 'true' -or
     $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:GITHUB_REPOSITORY -ne 'killu42/tex-setup') {
@@ -18,20 +18,60 @@ $work=Join-Path $env:RUNNER_TEMP ('tex-pdf-'+[guid]::NewGuid())
 $doc=Join-Path $work 'keep.tex'
 '\documentclass{article}\begin{document}Test.\end{document}' | Set-Content $doc -Encoding ASCII
 $docHash=(Get-FileHash $doc).Hash
-if ($Scenario -eq 'legacy') {
+if ($Scenario -in @('legacy','publisher-refused')) {
     Invoke-Expression ($commands.windows -split "`n")[0]
     winget install --id MiKTeX.MiKTeX -e --scope user -s winget
     Check ($LASTEXITCODE -eq 0) 'Old direct install succeeds'
     if (Test-Path -LiteralPath $link) { Remove-Item -LiteralPath $link }
     Check (-not (Test-Path $link)) 'Missing Start-menu entry reproduced'
 }
+$refusalHost=$null; $testShell=$null
+if ($Scenario -eq 'publisher-refused') {
+    # Real signed-module prompt; test host chooses its default "Do not run".
+    # No certificate-store edits, no mocked Import-Module, disposable VM only.
+    $module=Get-Module Microsoft.WinGet.Client -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
+    $format=Join-Path $module.ModuleBase 'Format.ps1xml'
+    $signature=Get-AuthenticodeSignature -FilePath $format
+    Check ($signature.Status -eq 'Valid' -and $signature.SignerCertificate.Subject -like '*CN=Microsoft Corporation*') 'Genuine Microsoft-signed Format.ps1xml'
+    foreach ($store in @('Cert:\CurrentUser\TrustedPublisher','Cert:\LocalMachine\TrustedPublisher')) {
+        $trusted=Join-Path $store $signature.SignerCertificate.Thumbprint
+        Check (-not (Test-Path -LiteralPath $trusted)) 'Publisher not pre-trusted; certificate store unchanged'
+    }
+    Add-Type -Path (Join-Path $PSScriptRoot 'test-publisher-host.cs')
+    $refusalHost=New-Object PublisherRefusalHost($Host)
+    $testShell=[powershell]::Create()
+    $testShell.Runspace=[runspacefactory]::CreateRunspace($refusalHost)
+    $testShell.Runspace.Open()
+    [void]$testShell.AddScript('Import-Module PackageManagement; Import-Module PowerShellGet')
+    [void]$testShell.Invoke()
+    Check ($testShell.Streams.Error.Count -eq 0) 'Publisher-test prerequisites loaded'
+    $testShell.Commands.Clear()
+    $previousPolicy=Get-ExecutionPolicy -Scope Process
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy AllSigned -Force
+}
+try {
 for ($pass=1;$pass -le 2;$pass++) {
     Write-Host "STAGE install/update/repair $pass"
-    Invoke-Expression $commands.windows
+    if ($testShell) {
+        [void]$testShell.AddScript($commands.windows)
+        $testShell.Invoke() | Out-Host
+        if ($testShell.Streams.Error.Count) { throw ($testShell.Streams.Error | Out-String) }
+        $testShell.Commands.Clear()
+        Check ($refusalHost.RefusalUI.Denials -ge $pass) "Actual Format.ps1xml publisher prompt declined, pass $pass"
+        Check ((Get-ExecutionPolicy -Scope Process) -eq 'AllSigned') "Security policy unchanged, pass $pass"
+    } else {
+        Invoke-Expression $commands.windows
+    }
     Check (Test-Path $editor) "Editor exists, pass $pass"
     Check ((New-Object -ComObject WScript.Shell).CreateShortcut($link).TargetPath -eq $editor) "Start menu repaired, pass $pass"
     & (Join-Path $bin 'miktex.exe') packages check-update
     Check ($LASTEXITCODE -eq 0) "Packages current, pass $pass"
+}
+} finally {
+    if ($testShell) {
+        Set-ExecutionPolicy -Scope Process -ExecutionPolicy $previousPolicy -Force
+        $testShell.Runspace.Dispose(); $testShell.Dispose()
+    }
 }
 $p=Start-Process $editor -PassThru
 try {

@@ -90,10 +90,11 @@ function Install-TeXWinGetRelease {
     }
     Write-Host 'WinGet wird eingerichtet bzw. aktualisiert ...'
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-    Install-PackageProvider -Name NuGet -Scope CurrentUser -Force | Out-Null
-    Install-Module Microsoft.WinGet.Client -Scope CurrentUser -Repository PSGallery -Force
-    Import-Module Microsoft.WinGet.Client -Force
     try {
+        Install-PackageProvider -Name NuGet -Scope CurrentUser -Force | Out-Null
+        Install-Module Microsoft.WinGet.Client -Scope CurrentUser -Repository PSGallery -Force
+        # A declined publisher prompt can already fail here, before Repair runs.
+        Import-Module Microsoft.WinGet.Client -Force
         Repair-WinGetPackageManager -Latest -ErrorAction Stop | Out-Null
     } catch {
         Write-Host 'WinGet wird ueber das offizielle Microsoft-Installationspaket eingerichtet ...'

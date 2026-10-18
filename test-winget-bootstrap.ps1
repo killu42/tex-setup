@@ -50,4 +50,33 @@ Case 'download progress preference stays local to the function' {
     Install-TeXWinGetRelease -Architecture 'AMD64'
     Assert ($ProgressPreference -eq 'Continue')
 }
-Write-Host "$script:count isolated WinGet release checks passed. No real Appx installation."
+# Exercise the actual bootstrap try/catch, including errors BEFORE Repair.
+$setup=$ast.FindAll({param($node) $node -is [Management.Automation.Language.TryStatementAst] -and
+    $node.Body.Extent.Text -match 'Import-Module Microsoft.WinGet.Client'},$true)
+Assert (@($setup).Count -eq 1)
+$bootstrap=[scriptblock]::Create($setup[0].Extent.Text)
+function Stage($Name) {
+    $script:steps+=,$Name
+    if ($script:failStage -eq $Name) { throw 'Format.ps1xml cannot be loaded: publisher execution declined.' }
+}
+function Install-PackageProvider { Stage 'provider' }
+function Install-Module { Stage 'module' }
+function Import-Module { Stage 'import' }
+function Repair-WinGetPackageManager { Stage 'repair' }
+function Install-TeXWinGetRelease {
+    $script:steps+=,'fallback'
+    if ($script:failFallback) { throw 'Real Appx security rejection' }
+}
+foreach ($stage in @('provider','module','import','repair','none')) {
+    Case "bootstrap handles $stage failure without changing execution policy" {
+        $script:steps=@(); $script:failStage=$stage; $script:failFallback=$false
+        & $bootstrap
+        Assert (($script:steps -contains 'fallback') -eq ($stage -ne 'none'))
+        if ($stage -eq 'import') { Assert ($script:steps -notcontains 'repair') }
+    }
+}
+Case 'fallback rejection remains a real failure, never false success' {
+    $script:steps=@(); $script:failStage='import'; $script:failFallback=$true
+    Throws { & $bootstrap }
+}
+Write-Host "$script:count isolated WinGet checks passed. No real Appx installation."
