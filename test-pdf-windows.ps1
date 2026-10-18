@@ -53,12 +53,21 @@ try {
 for ($pass=1;$pass -le 2;$pass++) {
     Write-Host "STAGE install/update/repair $pass"
     if ($testShell) {
-        [void]$testShell.AddScript($commands.windows)
+        # Only the first PDF line needs a custom host to answer its prompt.
+        # Run native MiKTeX in the normal ConsoleHost, just like the PDF:
+        # a custom runspace redirects native stderr and changes PS5 behavior.
+        $lines=$commands.windows -split "\r?\n",2
+        [void]$testShell.AddScript($lines[0])
         $testShell.Invoke() | Out-Host
         if ($testShell.Streams.Error.Count) { throw ($testShell.Streams.Error | Out-String) }
         $testShell.Commands.Clear()
         Check ($refusalHost.RefusalUI.Denials -ge $pass) "Actual Format.ps1xml publisher prompt declined, pass $pass"
         Check ((Get-ExecutionPolicy -Scope Process) -eq 'AllSigned') "Security policy unchanged, pass $pass"
+        [void]$testShell.AddScript('(Get-Command Update-TeX).Definition')
+        $definition=$testShell.Invoke()
+        $testShell.Commands.Clear()
+        Check ($definition[0].ToString() -eq (Get-Command Update-TeX).Definition) 'Same published Update-TeX in both hosts'
+        Invoke-Expression $lines[1]
     } else {
         Invoke-Expression $commands.windows
     }
