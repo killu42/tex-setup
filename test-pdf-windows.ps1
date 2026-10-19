@@ -1,5 +1,5 @@
 # Real lifecycle test. Never run on a private workstation.
-param([ValidateSet('fresh','legacy')][string]$Scenario='fresh')
+param([ValidateSet('fresh','legacy','no-winget')][string]$Scenario='fresh')
 $ErrorActionPreference='Stop'
 if ($env:OS -ne 'Windows_NT' -or $env:GITHUB_ACTIONS -ne 'true' -or
     $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:GITHUB_REPOSITORY -ne 'killu42/tex-setup') {
@@ -21,7 +21,12 @@ $docHash=(Get-FileHash $doc).Hash
 # Current-user package only, on the explicitly guarded disposable runner.
 $baselineApp=Get-AppxPackage Microsoft.DesktopAppInstaller
 $oldVersion=$null
-if ($baselineApp.NonRemovable) {
+if ($Scenario -eq 'no-winget') {
+    # A genuine absent baseline: never downgrade this test to an update test.
+    Check (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) 'No WinGet command before setup'
+    Check (@(Get-AppxPackage -AllUsers Microsoft.DesktopAppInstaller).Count -eq 0) 'No App Installer package for any user before setup'
+    Check (@(Get-AppxProvisionedPackage -Online | Where-Object DisplayName -eq 'Microsoft.DesktopAppInstaller').Count -eq 0) 'No provisioned App Installer before setup'
+} elseif ($baselineApp.NonRemovable) {
     $oldVersion=[version]$baselineApp.Version
     Write-Host "Windows system component cannot be removed: test real WinGet update from $oldVersion instead."
 } else {

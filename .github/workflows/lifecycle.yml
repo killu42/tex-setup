@@ -5,7 +5,7 @@ on:
       platform:
         type: choice
         default: all
-        options: [all, windows, linux, mac, intel]
+        options: [all, windows, windows-no-winget, linux, mac, intel]
         description: Systeme fuer den vollstaendigen Installationstest
 permissions:
   contents: read
@@ -25,8 +25,18 @@ jobs:
           persist-credentials: false
       - shell: powershell
         run: ./test-pdf-windows.ps1 -Scenario ${{ matrix.scenario }}
+  windows-no-winget:
+    if: ${{ inputs.platform == 'windows-no-winget' }}
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - shell: powershell
+        run: ./test-pdf-windows.ps1 -Scenario no-winget
   unix:
-    if: ${{ inputs.platform != 'windows' }}
+    if: ${{ inputs.platform != 'windows' && inputs.platform != 'windows-no-winget' }}
     strategy:
       fail-fast: false
       matrix:
