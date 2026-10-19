@@ -51,6 +51,8 @@ if ($Scenario -eq 'legacy') {
     if (Test-Path -LiteralPath $link) { Remove-Item -LiteralPath $link }
     Check (-not (Test-Path $link)) 'Missing Start-menu entry reproduced'
 }
+$transcript=Join-Path $work 'setup.txt'
+Start-Transcript -Path $transcript | Out-Null
 for ($pass=1;$pass -le 2;$pass++) {
     Write-Host "STAGE install/update/repair $pass"
     Invoke-Expression $commands.windows
@@ -64,6 +66,13 @@ for ($pass=1;$pass -le 2;$pass++) {
     Check ((New-Object -ComObject WScript.Shell).CreateShortcut($link).TargetPath -eq $editor) "Start menu repaired, pass $pass"
     & (Join-Path $bin 'miktex.exe') packages check-update
     Check ($LASTEXITCODE -eq 0) "Packages current, pass $pass"
+}
+Stop-Transcript | Out-Null
+if ($Scenario -eq 'no-winget') {
+    $output=Get-Content -LiteralPath $transcript -Raw
+    Check ($output -match 'No applicable app licenses found') 'Original native licensing failure reproduced'
+    Check (([regex]::Matches($output,'Microsoft-App-Lizenz wird repariert')).Count -eq 1) 'License repaired once; repeated setup needs no repair'
+    Check (@(Get-AppxProvisionedPackage -Online | Where-Object DisplayName -eq 'Microsoft.DesktopAppInstaller').Count -gt 0) 'Official licensed App Installer provisioned'
 }
 $p=Start-Process $editor -PassThru
 try {

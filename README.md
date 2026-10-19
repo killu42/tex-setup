@@ -28,6 +28,10 @@ WinGet wird zuerst direkt aus Microsofts signiertem Installationspaket
 eingerichtet/aktualisiert. Nur wenn das scheitert, wird das Microsoft-
 PowerShell-Modul als Alternative verwendet. Aktuelle oder neuere
 App-Installer-Pakete werden nicht zurueckgestuft.
+Auch der tatsaechliche Start wird geprueft. Bei einem Windows-Startfehler
+wird Microsofts signiertes Paket mit seiner offiziellen Offline-Lizenz
+repariert und erneut gestartet. Nur diese Reparatur fordert bei Bedarf
+Administratorrechte an; MiKTeX bleibt im urspruenglichen Benutzerkonto.
 
 ```powershell
 irm https://raw.githubusercontent.com/killu42/tex-setup/main/win.ps1 | iex

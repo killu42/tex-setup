@@ -102,6 +102,58 @@ function Install-TeXWinGetRelease {
         Remove-Item -LiteralPath $download -Recurse -Force -ErrorAction Stop
     }
 }
+function Repair-TeXWinGetLicense {
+    # Microsoft provisions the signed bundle with its matching official offline license.
+    # Only this repair is elevated; MiKTeX stays in the original user's account.
+    $ErrorActionPreference = 'Stop'
+    $ProgressPreference = 'SilentlyContinue'
+    $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)
+    if (-not $admin) {
+        $code = 'function Repair-TeXWinGetLicense {' + ${function:Repair-TeXWinGetLicense}.ToString() +
+            '}; try { Repair-TeXWinGetLicense; exit 0 } catch { Write-Error $_; exit 1 }'
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($code))
+        $hostExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
+            $hostExe = Join-Path $env:SystemRoot 'Sysnative\WindowsPowerShell\v1.0\powershell.exe'
+        }
+        Write-Host 'Windows benoetigt zur WinGet-Lizenzreparatur die Administratorbestaetigung.'
+        $process = Start-Process $hostExe -Verb RunAs -ArgumentList @('-NoProfile','-EncodedCommand',$encoded) -Wait -PassThru
+        if ($process.ExitCode -ne 0) { throw 'WinGet-Lizenzreparatur fehlgeschlagen.' }
+        return
+    }
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    $release = Invoke-RestMethod 'https://api.github.com/repos/microsoft/winget-cli/releases/latest' -ErrorAction Stop
+    $bundle = @($release.assets | Where-Object name -eq 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle')
+    $license = @($release.assets | Where-Object name -Like '*License1.xml')
+    if ($bundle.Count -ne 1 -or $license.Count -ne 1) { throw 'Microsoft-Installationspaket oder Lizenzdatei fehlt.' }
+    $download = Join-Path ([IO.Path]::GetTempPath()) ('tex-winget-license-' + [guid]::NewGuid())
+    [void][IO.Directory]::CreateDirectory($download)
+    try {
+        $packagePath = Join-Path $download 'AppInstaller.msixbundle'
+        $licensePath = Join-Path $download 'License.xml'
+        Invoke-WebRequest -UseBasicParsing $bundle[0].browser_download_url -OutFile $packagePath -ErrorAction Stop
+        Invoke-WebRequest -UseBasicParsing $license[0].browser_download_url -OutFile $licensePath -ErrorAction Stop
+        Add-AppxProvisionedPackage -Online -PackagePath $packagePath -LicensePath $licensePath -ErrorAction Stop | Out-Null
+    } finally {
+        Remove-Item -LiteralPath $download -Recurse -Force -ErrorAction Stop
+    }
+}
+function Get-TeXWinGet {
+    $cmd = Get-Command winget.exe -ErrorAction SilentlyContinue
+    $wg = if ($cmd) { $cmd.Source } else { $null }
+    if (-not $wg) {
+        $app = Get-AppxPackage Microsoft.DesktopAppInstaller |
+            Sort-Object Version -Descending | Select-Object -First 1
+        if ($app) { $wg = Join-Path $app.InstallLocation 'winget.exe' }
+    }
+    if (-not $wg -or -not (Test-Path -LiteralPath $wg -PathType Leaf)) {
+        throw 'WinGet konnte nicht eingerichtet werden.'
+    }
+    & $wg --version | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw 'WinGet kann nicht gestartet werden.' }
+    return $wg
+}
 & {
     $ErrorActionPreference = 'Stop'
     if ($env:OS -ne 'Windows_NT') { throw 'Dieses Skript ist nur fuer Windows.' }
@@ -119,17 +171,16 @@ function Install-TeXWinGetRelease {
         Import-Module Microsoft.WinGet.Client -Force
         Repair-WinGetPackageManager -Latest -ErrorAction Stop | Out-Null
     }
-    $cmd = Get-Command winget.exe -ErrorAction SilentlyContinue
-    $wg = if ($cmd) { $cmd.Source } else { $null }
-    if (-not $wg) {
+    try { $wg = Get-TeXWinGet }
+    catch [System.Management.Automation.ApplicationFailedException] {
+        Write-Host 'WinGet ist installiert, startet aber nicht. Microsoft-App-Lizenz wird repariert ...'
+        Write-Host $_.Exception.Message
+        Repair-TeXWinGetLicense
+        # Register again in the original account, even if UAC used another administrator.
         $app = Get-AppxPackage Microsoft.DesktopAppInstaller |
             Sort-Object Version -Descending | Select-Object -First 1
-        if ($app) { $wg = Join-Path $app.InstallLocation 'winget.exe' }
+        if ($app) { Add-AppxPackage -Register (Join-Path $app.InstallLocation 'AppxManifest.xml') -DisableDevelopmentMode -ErrorAction Stop }
+        $wg = Get-TeXWinGet
     }
-    if (-not $wg -or -not (Test-Path -LiteralPath $wg -PathType Leaf)) {
-        throw 'WinGet konnte nicht eingerichtet werden.'
-    }
-    & $wg --version | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw 'WinGet kann nicht gestartet werden.' }
     $env:Path = (Split-Path -Parent $wg) + ';' + $env:Path
 }

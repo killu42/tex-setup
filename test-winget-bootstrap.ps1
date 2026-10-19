@@ -117,4 +117,81 @@ foreach ($stage in @('provider','module','import','repair')) {
         Assert ($script:steps[-1] -eq $stage)
     }
 }
+# Actual startup error handler: repair once, then require a successful real start.
+$startup=$ast.FindAll({param($node) $node -is [Management.Automation.Language.TryStatementAst] -and
+    $node.Body.Extent.Text -match '^\{\s*\$wg = Get-TeXWinGet\s*\}$'},$true)
+Assert (@($startup).Count -eq 1)
+$startupCheck=[scriptblock]::Create($startup[0].Extent.Text)
+function Get-TeXWinGet {
+    $script:starts++
+    if ($script:starts -le $script:failedStarts) {
+        throw [System.Management.Automation.ApplicationFailedException]::new('No applicable app licenses found')
+    }
+    return 'winget.exe'
+}
+function Repair-TeXWinGetLicense {
+    $script:repairs++
+    if ($script:repairFails) { throw 'License repair denied or failed' }
+}
+function Add-AppxPackage { $script:registrations++ }
+foreach ($failures in @(0,1,2)) {
+    Case "startup failures=${failures}: healthy, repaired, or still rejected" {
+        $script:starts=0; $script:repairs=0; $script:registrations=0
+        $script:failedStarts=$failures; $script:repairFails=$false
+        if ($failures -eq 2) { Throws { & $startupCheck } } else { & $startupCheck }
+        Assert ($script:starts -eq [Math]::Min(1+$failures,2))
+        Assert ($script:repairs -eq [Math]::Min($failures,1))
+    }
+}
+Case 'denied license repair stops; never reports successful setup' {
+    $script:starts=0; $script:repairs=0; $script:failedStarts=1; $script:repairFails=$true
+    Throws { & $startupCheck }; Assert ($script:starts -eq 1 -and $script:repairs -eq 1)
+}
+# Platform identity is stubbed; production download/provision/cleanup/elevation logic is used.
+$repair=$ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Repair-TeXWinGetLicense'},$false)
+$identity=$repair.Find({param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$admin'},$true)
+. ([scriptblock]::Create($repair.Extent.Text.Replace($identity.Extent.Text,'$admin = $script:isAdmin')))
+function Invoke-RestMethod($Uri) {
+    Assert ($Uri -eq 'https://api.github.com/repos/microsoft/winget-cli/releases/latest')
+    $assets=@([pscustomobject]@{name='Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle';browser_download_url='https://github.com/microsoft/winget-cli/releases/download/v1.29.380/bundle.msixbundle'})
+    if (-not $script:noLicense) { $assets+= [pscustomobject]@{name='official_License1.xml';browser_download_url='https://github.com/microsoft/winget-cli/releases/download/v1.29.380/License1.xml'} }
+    [pscustomobject]@{assets=$assets}
+}
+function Invoke-WebRequest([switch]$UseBasicParsing,$Uri,$OutFile) {
+    Assert ($Uri -like 'https://github.com/microsoft/winget-cli/releases/download/v1.29.380/*')
+    $script:directory=Split-Path -Parent $OutFile
+    if ($script:failDownload) { throw 'Network unavailable' }
+    Set-Content -LiteralPath $OutFile 'test Microsoft asset'
+}
+function Add-AppxProvisionedPackage([switch]$Online,$PackagePath,$LicensePath) {
+    Assert ($Online -and (Test-Path -LiteralPath $PackagePath) -and (Test-Path -LiteralPath $LicensePath))
+    $script:provisions++
+    if ($script:provisionFails) { throw 'Provision rejected' }
+}
+function Start-Process($FilePath,$Verb,$ArgumentList,[switch]$Wait,[switch]$PassThru) {
+    $script:elevations++
+    Assert ($Verb -eq 'RunAs' -and $Wait -and $PassThru)
+    Assert ($FilePath -like '*WindowsPowerShell*v1.0*powershell.exe')
+    Assert ($ArgumentList[0] -eq '-NoProfile' -and $ArgumentList[1] -eq '-EncodedCommand')
+    $child=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($ArgumentList[2]))
+    Assert ($child -match 'Repair-TeXWinGetLicense; exit 0' -and $child -notmatch 'Update-TeX|Bypass|Set-ExecutionPolicy')
+    $childErrors=$null; [void][Management.Automation.Language.Parser]::ParseInput($child,[ref]$null,[ref]$childErrors)
+    Assert (-not $childErrors)
+    if ($script:cancelUac) { throw 'User cancelled elevation' }
+    [pscustomobject]@{ExitCode=$script:childExit}
+}
+foreach ($mode in @('success','download','missing-license','provision','elevate','child-error','uac-cancel')) {
+    Case "official license repair: $mode" {
+        $script:provisions=0; $script:elevations=0; $script:isAdmin=$mode -notin @('elevate','child-error','uac-cancel')
+        $script:noLicense=$mode -eq 'missing-license'; $script:failDownload=$mode -eq 'download'
+        $script:provisionFails=$mode -eq 'provision'; $script:cancelUac=$mode -eq 'uac-cancel'
+        $script:childExit=if ($mode -eq 'child-error') {1} else {0}
+        $oldRoot=$env:SystemRoot; $env:SystemRoot=[IO.Path]::GetTempPath()
+        try {
+            if ($mode -in @('success','elevate')) { Repair-TeXWinGetLicense } else { Throws { Repair-TeXWinGetLicense } }
+        } finally { $env:SystemRoot=$oldRoot }
+        Assert ($script:provisions -eq $(if ($mode -in @('success','provision')) {1} else {0}))
+        Assert ($script:elevations -eq $(if ($script:isAdmin) {0} else {1}))
+    }
+}
 Write-Host "$script:count isolated WinGet checks passed. No real Appx installation."
