@@ -19,12 +19,18 @@ $doc=Join-Path $work 'keep.tex'
 '\documentclass{article}\begin{document}Test.\end{document}' | Set-Content $doc -Encoding ASCII
 $docHash=(Get-FileHash $doc).Hash
 # Current-user package only, on the explicitly guarded disposable runner.
-Get-AppxPackage Microsoft.DesktopAppInstaller | Remove-AppxPackage -ErrorAction Stop
-Check (@(Get-AppxPackage Microsoft.DesktopAppInstaller).Count -eq 0) 'No registered WinGet before setup'
+$baselineApp=Get-AppxPackage Microsoft.DesktopAppInstaller
+$oldVersion=$null
+if ($baselineApp.NonRemovable) {
+    $oldVersion=[version]$baselineApp.Version
+    Write-Host "Windows system component cannot be removed: test real WinGet update from $oldVersion instead."
+} else {
+    $baselineApp | Remove-AppxPackage -ErrorAction Stop
+    Check (@(Get-AppxPackage Microsoft.DesktopAppInstaller).Count -eq 0) 'No registered WinGet before setup'
+}
 $modulesBefore=@(Get-Module Microsoft.WinGet.Client -ListAvailable | ForEach-Object Path) -join '|'
 $loadedBefore=@(Get-Module Microsoft.WinGet.Client).Count
 $policyBefore=Get-ExecutionPolicy -Scope Process
-$oldVersion=$null
 if ($Scenario -eq 'legacy') {
     # Prepare a genuine older signed Microsoft release, not a mocked update.
     $tokens=$null; $errors=$null
