@@ -1,0 +1,9 @@
+Vereinfachte TeX-Einrichtung
+
+Die neuen Aufrufe verwenden kein Installationsprotokoll.
+Die Entfernung betrifft TeX samt Editor, auch wenn zuvor vorhanden.
+Homebrew und WinGet bleiben erhalten. Alte URLs bleiben unveraendert.
+
+Mac: Homebrew-MacTeX. Linux: APT. Windows: Standard-Benutzerinstallation.
+Abweichende Datenpfade und abhaengige Fremdprogramme werden geschuetzt.
+Tests ersetzen keine Garantie fuer beliebige Rechner.
