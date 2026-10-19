@@ -123,17 +123,23 @@ function Repair-TeXWinGetLicense {
         return
     }
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-    $release = Invoke-RestMethod 'https://api.github.com/repos/microsoft/winget-cli/releases/latest' -ErrorAction Stop
-    $bundle = @($release.assets | Where-Object name -eq 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle')
-    $license = @($release.assets | Where-Object name -Like '*License1.xml')
-    if ($bundle.Count -ne 1 -or $license.Count -ne 1) { throw 'Microsoft-Installationspaket oder Lizenzdatei fehlt.' }
+    # Public download pages avoid the unauthenticated GitHub API's shared-IP limit.
+    $page = Invoke-WebRequest -UseBasicParsing 'https://github.com/microsoft/winget-cli/releases/latest' -ErrorAction Stop
+    $uri = $page.BaseResponse.ResponseUri
+    if (-not $uri) { $uri = $page.BaseResponse.RequestMessage.RequestUri }
+    $tag = ($uri.AbsolutePath -split '/')[-1]
+    if ($tag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Microsoft-Releaseversion konnte nicht ermittelt werden.' }
+    $assets = Invoke-WebRequest -UseBasicParsing ("https://github.com/microsoft/winget-cli/releases/expanded_assets/$tag") -ErrorAction Stop
+    $prefix = "/microsoft/winget-cli/releases/download/$tag/"
+    $license = @($assets.Links.href | Where-Object { $_.StartsWith($prefix) -and $_ -match '/[a-zA-Z0-9_]+License1\.xml$' } | Select-Object -Unique)
+    if ($license.Count -ne 1) { throw 'Microsoft-Lizenzdatei fehlt.' }
     $download = Join-Path ([IO.Path]::GetTempPath()) ('tex-winget-license-' + [guid]::NewGuid())
     [void][IO.Directory]::CreateDirectory($download)
     try {
         $packagePath = Join-Path $download 'AppInstaller.msixbundle'
         $licensePath = Join-Path $download 'License.xml'
-        Invoke-WebRequest -UseBasicParsing $bundle[0].browser_download_url -OutFile $packagePath -ErrorAction Stop
-        Invoke-WebRequest -UseBasicParsing $license[0].browser_download_url -OutFile $licensePath -ErrorAction Stop
+        Invoke-WebRequest -UseBasicParsing ("https://github.com${prefix}Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle") -OutFile $packagePath -ErrorAction Stop
+        Invoke-WebRequest -UseBasicParsing ("https://github.com" + $license[0]) -OutFile $licensePath -ErrorAction Stop
         Add-AppxProvisionedPackage -Online -PackagePath $packagePath -LicensePath $licensePath -ErrorAction Stop | Out-Null
     } finally {
         Remove-Item -LiteralPath $download -Recurse -Force -ErrorAction Stop

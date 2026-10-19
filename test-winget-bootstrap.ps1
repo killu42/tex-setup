@@ -151,13 +151,16 @@ Case 'denied license repair stops; never reports successful setup' {
 $repair=$ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Repair-TeXWinGetLicense'},$false)
 $identity=$repair.Find({param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$admin'},$true)
 . ([scriptblock]::Create($repair.Extent.Text.Replace($identity.Extent.Text,'$admin = $script:isAdmin')))
-function Invoke-RestMethod($Uri) {
-    Assert ($Uri -eq 'https://api.github.com/repos/microsoft/winget-cli/releases/latest')
-    $assets=@([pscustomobject]@{name='Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle';browser_download_url='https://github.com/microsoft/winget-cli/releases/download/v1.29.380/bundle.msixbundle'})
-    if (-not $script:noLicense) { $assets+= [pscustomobject]@{name='official_License1.xml';browser_download_url='https://github.com/microsoft/winget-cli/releases/download/v1.29.380/License1.xml'} }
-    [pscustomobject]@{assets=$assets}
-}
+function Invoke-RestMethod { throw 'GitHub API must not be needed' }
 function Invoke-WebRequest([switch]$UseBasicParsing,$Uri,$OutFile) {
+    if ($Uri -eq 'https://github.com/microsoft/winget-cli/releases/latest') {
+        return [pscustomobject]@{BaseResponse=[pscustomobject]@{ResponseUri=[uri]'https://github.com/microsoft/winget-cli/releases/tag/v1.29.380'}}
+    }
+    if ($Uri -eq 'https://github.com/microsoft/winget-cli/releases/expanded_assets/v1.29.380') {
+        $links=@([pscustomobject]@{href='/microsoft/winget-cli/releases/download/v1.29.380/other.zip'})
+        if (-not $script:noLicense) { $links+=[pscustomobject]@{href='/microsoft/winget-cli/releases/download/v1.29.380/official_License1.xml'} }
+        return [pscustomobject]@{Links=$links}
+    }
     Assert ($Uri -like 'https://github.com/microsoft/winget-cli/releases/download/v1.29.380/*')
     $script:directory=Split-Path -Parent $OutFile
     if ($script:failDownload) { throw 'Network unavailable' }
