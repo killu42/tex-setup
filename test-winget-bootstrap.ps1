@@ -17,7 +17,7 @@ function Invoke-WebRequest([switch]$UseBasicParsing,$Uri,$OutFile) {
         $zip=[IO.Compression.ZipFile]::Open($OutFile,[IO.Compression.ZipArchiveMode]::Create)
         try {
             $writer=[IO.StreamWriter]::new($zip.CreateEntry('AppxMetadata/AppxBundleManifest.xml').Open())
-            try { $writer.Write('<Bundle><Identity Version="1.29.380.0" /></Bundle>') }
+            try { $writer.Write('<Bundle xmlns="http://schemas.microsoft.com/appx/2013/bundle"><Identity Version="2026.1010.1234.0" /><Packages><Package Type="resource" Version="1.29.380.0"/><Package Type="application" Version="1.29.379.0" Architecture="arm64" IsStub="true"/><Package Type="application" Version="1.29.380.0" Architecture="x64"/><Package Type="application" Version="1.29.380.0" Architecture="arm64"/><Package Type="application" Version="1.29.380.0" Architecture="x86"/></Packages></Bundle>') }
             finally { $writer.Dispose() }
         } finally { $zip.Dispose() }
     } else { Set-Content -LiteralPath $OutFile 'mock release asset' }
@@ -33,14 +33,18 @@ function Expand-Archive($LiteralPath,$DestinationPath) {
     }
 }
 function Add-AppxPackage($Path,$DependencyPath) {
-    $script:installs++
+    $script:attempts++
     Assert (Test-Path -LiteralPath $Path)
+    if ($script:failInstall) { throw 'mock Appx policy rejection' }
+    if (-not $DependencyPath -and $script:needsDependencies) { throw '0x80073CF3: dependency missing' }
+    $script:installs++
+    if (-not $DependencyPath) { return }
     Assert (@($DependencyPath).Count -eq 1)
     Assert ((Split-Path -Leaf (Split-Path -Parent $DependencyPath[0])) -eq $script:expected)
-    if ($script:failInstall) { throw 'mock Appx policy rejection' }
 }
 function Case($Name,[scriptblock]$Action) {
     $script:installs=0; $script:directory=$null
+    $script:attempts=0; $script:needsDependencies=$true
     $script:failDownload=$false; $script:missingDependencies=$false; $script:failInstall=$false
     $script:installedVersion=$null; $script:installedStatus='Ok'
     & $Action
@@ -56,7 +60,12 @@ foreach ($pair in @(@('AMD64','x64'),@('ARM64','arm64'),@('x86','x86'))) {
 Case 'unknown architecture never installs' { Throws { Install-TeXWinGetRelease -Architecture 'unknown' }; Assert ($script:installs -eq 0) }
 Case 'missing dependencies never installs' { $script:missingDependencies=$true; Throws { Install-TeXWinGetRelease -Architecture 'AMD64' }; Assert ($script:installs -eq 0) }
 Case 'download failure never installs' { $script:failDownload=$true; Throws { Install-TeXWinGetRelease -Architecture 'AMD64' }; Assert ($script:installs -eq 0) }
-Case 'Appx security rejection propagates and cleans only temporary assets' { $script:expected='x64'; $script:failInstall=$true; Throws { Install-TeXWinGetRelease -Architecture 'AMD64' }; Assert ($script:installs -eq 1) }
+Case 'Appx security rejection propagates without dependency retry' { $script:expected='x64'; $script:failInstall=$true; Throws { Install-TeXWinGetRelease -Architecture 'AMD64' }; Assert ($script:installs -eq 0 -and $script:attempts -eq 1) }
+Case 'sufficient existing frameworks reused without reinstalling them' {
+    $script:needsDependencies=$false
+    Install-TeXWinGetRelease -Architecture 'AMD64'
+    Assert ($script:installs -eq 1 -and $script:attempts -eq 1)
+}
 Case 'download progress preference stays local to the function' {
     $ProgressPreference='Continue'; $script:expected='x64'
     Install-TeXWinGetRelease -Architecture 'AMD64'

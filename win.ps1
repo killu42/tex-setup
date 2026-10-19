@@ -66,23 +66,33 @@ function Install-TeXWinGetRelease {
     $download = Join-Path ([IO.Path]::GetTempPath()) ('tex-winget-' + [guid]::NewGuid())
     [void][IO.Directory]::CreateDirectory($download)
     try {
+        $folder = switch ($Architecture) { 'AMD64' {'x64'} 'ARM64' {'arm64'} 'x86' {'x86'} default { throw 'Unbekannte Windows-Architektur.' } }
         $bundle = Join-Path $download 'AppInstaller.msixbundle'
         $archive = Join-Path $download 'Dependencies.zip'
         Invoke-WebRequest -UseBasicParsing -Uri ($release + 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle') -OutFile $bundle -ErrorAction Stop
-        # Read the package version, not the differently numbered WinGet release tag.
+        # Compare the actual app package, not the date-numbered bundle or stub.
         Add-Type -AssemblyName System.IO.Compression.FileSystem
         $zip = [IO.Compression.ZipFile]::OpenRead($bundle)
         try {
             $reader = [IO.StreamReader]::new($zip.GetEntry('AppxMetadata/AppxBundleManifest.xml').Open())
-            try { $version = [version]([xml]$reader.ReadToEnd()).Bundle.Identity.Version }
+            try {
+                $package = ([xml]$reader.ReadToEnd()).Bundle.Packages.Package | Where-Object {
+                    $_.Type -eq 'application' -and $_.Architecture -eq $folder -and $_.IsStub -ne 'true'
+                } | Select-Object -First 1
+                $version = [version]$package.Version
+                if (-not $version) { throw 'WinGet-Paketversion fehlt.' }
+            }
             finally { $reader.Dispose() }
         } finally { $zip.Dispose() }
         $installed = Get-AppxPackage Microsoft.DesktopAppInstaller | Sort-Object Version -Descending | Select-Object -First 1
         if ($installed -and [version]$installed.Version -ge $version -and $installed.Status -eq 'Ok') { return }
+        # Reuse sufficient Windows frameworks; do not reinstall ones in use.
+        try { Add-AppxPackage -Path $bundle -ErrorAction Stop; return }
+        catch { if ($_ -notmatch '0x80073CF3') { throw } }
+        # Only a missing/conflicting dependency triggers the dependency package route.
         Invoke-WebRequest -UseBasicParsing -Uri ($release + 'DesktopAppInstaller_Dependencies.zip') -OutFile $archive -ErrorAction Stop
         $dependencies = Join-Path $download 'Dependencies'
         Expand-Archive -LiteralPath $archive -DestinationPath $dependencies -ErrorAction Stop
-        $folder = switch ($Architecture) { 'AMD64' {'x64'} 'ARM64' {'arm64'} 'x86' {'x86'} default { throw 'Unbekannte Windows-Architektur.' } }
         $packages = @(Get-ChildItem -LiteralPath (Join-Path $dependencies $folder) -File -Recurse |
             Where-Object { $_.Extension -in @('.appx','.msix') } | ForEach-Object FullName)
         if ($packages.Count -eq 0) { throw 'WinGet-Abhaengigkeiten fehlen.' }
