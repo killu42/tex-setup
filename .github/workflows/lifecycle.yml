@@ -26,7 +26,7 @@ jobs:
       - shell: powershell
         run: ./test-pdf-windows.ps1 -Scenario ${{ matrix.scenario }}
   windows-no-winget:
-    if: ${{ inputs.platform == 'windows-no-winget' }}
+    if: ${{ inputs.platform == 'windows-no-winget' || inputs.platform == 'windows' }}
     runs-on: windows-2022
     timeout-minutes: 35
     steps:

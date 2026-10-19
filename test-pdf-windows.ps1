@@ -7,6 +7,18 @@ if ($env:OS -ne 'Windows_NT' -or $env:GITHUB_ACTIONS -ne 'true' -or
 }
 $commands=Get-Content (Join-Path $PSScriptRoot 'pdf-commands.json') -Raw | ConvertFrom-Json
 function Check($ok,$message) { if (-not $ok) {throw $message}; Write-Host "PASS $message" }
+# Raw GitHub can briefly serve the previous main revision. Never certify that as this commit.
+$source=(Get-Content (Join-Path $PSScriptRoot 'win.ps1') -Raw).Replace("`r`n","`n").Trim()
+for ($attempt=0;$attempt -lt 12;$attempt++) {
+    $served=(Invoke-RestMethod 'https://raw.githubusercontent.com/killu42/tex-setup/main/win.ps1').Replace("`r`n","`n").Trim()
+    if ($served -eq $source) { break }
+    Write-Host 'Waiting for the unchanged PDF URL to serve the tested revision.'
+    Start-Sleep 30
+}
+Check ($served -eq $source) 'PDF URL serves the exact tested script'
+$tokens=$null; $errors=$null
+$sourceAst=[Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors)
+if ($errors) { throw ($errors | Out-String) }
 $root=Join-Path $env:LOCALAPPDATA 'Programs\MiKTeX'
 $bin=Join-Path $root 'miktex\bin\x64'
 $editor=Join-Path $bin 'miktex-texworks.exe'
@@ -56,6 +68,11 @@ Start-Transcript -Path $transcript | Out-Null
 for ($pass=1;$pass -le 2;$pass++) {
     Write-Host "STAGE install/update/repair $pass"
     Invoke-Expression $commands.windows
+    foreach ($name in @('Update-TeX','Install-TeXWinGetRelease','Repair-TeXWinGetLicense','Get-TeXWinGet')) {
+        $definition=$sourceAst.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$false)
+        $body=$definition.Body.Extent.Text
+        Check ((Get-Command $name).ScriptBlock.ToString().Replace("`r`n","`n").Trim() -eq $body.Substring(1,$body.Length-2).Trim()) "Exact tested function loaded: $name, pass $pass"
+    }
     $version=[version](Get-AppxPackage Microsoft.DesktopAppInstaller).Version
     Write-Host "WinGet package: $version (baseline: $oldVersion)"
     if ($oldVersion) { Check ($version -gt $oldVersion) 'Existing older WinGet updated' }
