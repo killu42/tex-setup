@@ -6,7 +6,7 @@ if ($errors) { throw ($errors | Out-String) }
 $function=$ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Install-TeXWinGetRelease'},$false)
 . ([scriptblock]::Create($function.Extent.Text))
 $script:count=0
-Add-Type -AssemblyName System.IO.Compression.FileSystem
+Add-Type -AssemblyName System.IO.Compression.FileSystem,System.IO.Compression
 function Assert($condition) { if (-not $condition) { throw 'Assertion failed' } }
 function Invoke-WebRequest([switch]$UseBasicParsing,$Uri,$OutFile) {
     Assert ($ProgressPreference -eq 'SilentlyContinue')
