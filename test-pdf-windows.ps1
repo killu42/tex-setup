@@ -1,5 +1,5 @@
 # Real lifecycle test. Never run on a private workstation.
-param([ValidateSet('fresh','legacy','publisher-refused')][string]$Scenario='fresh')
+param([ValidateSet('fresh','legacy')][string]$Scenario='fresh')
 $ErrorActionPreference='Stop'
 if ($env:OS -ne 'Windows_NT' -or $env:GITHUB_ACTIONS -ne 'true' -or
     $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:GITHUB_REPOSITORY -ne 'killu42/tex-setup') {
@@ -18,76 +18,41 @@ $work=Join-Path $env:RUNNER_TEMP ('tex-pdf-'+[guid]::NewGuid())
 $doc=Join-Path $work 'keep.tex'
 '\documentclass{article}\begin{document}Test.\end{document}' | Set-Content $doc -Encoding ASCII
 $docHash=(Get-FileHash $doc).Hash
-if ($Scenario -in @('legacy','publisher-refused')) {
-    Invoke-Expression ($commands.windows -split "`n")[0]
-    winget install --id MiKTeX.MiKTeX -e --scope user -s winget
+# Current-user package only, on the explicitly guarded disposable runner.
+Get-AppxPackage Microsoft.DesktopAppInstaller | Remove-AppxPackage -ErrorAction Stop
+Check (@(Get-AppxPackage Microsoft.DesktopAppInstaller).Count -eq 0) 'No registered WinGet before setup'
+$modulesBefore=@(Get-Module Microsoft.WinGet.Client -ListAvailable | ForEach-Object Path) -join '|'
+$loadedBefore=@(Get-Module Microsoft.WinGet.Client).Count
+$policyBefore=Get-ExecutionPolicy -Scope Process
+$oldVersion=$null
+if ($Scenario -eq 'legacy') {
+    # Prepare a genuine older signed Microsoft release, not a mocked update.
+    $tokens=$null; $errors=$null
+    $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'win.ps1'),[ref]$tokens,[ref]$errors)
+    if ($errors) { throw ($errors | Out-String) }
+    $installer=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Install-TeXWinGetRelease'},$false)
+    & ([scriptblock]::Create($installer.Extent.Text.Replace('/releases/latest/download/','/releases/download/v1.29.290/') + "`nInstall-TeXWinGetRelease"))
+    $app=Get-AppxPackage Microsoft.DesktopAppInstaller
+    $oldVersion=[version]$app.Version
+    $env:Path=$app.InstallLocation+';'+$env:Path
+    & (Join-Path $app.InstallLocation 'winget.exe') install --id MiKTeX.MiKTeX -e --scope user -s winget
     Check ($LASTEXITCODE -eq 0) 'Old direct install succeeds'
     if (Test-Path -LiteralPath $link) { Remove-Item -LiteralPath $link }
     Check (-not (Test-Path $link)) 'Missing Start-menu entry reproduced'
 }
-$refusalHost=$null; $testShell=$null
-if ($Scenario -eq 'publisher-refused') {
-    # Real signed-module prompt; test host chooses its default "Do not run".
-    # No certificate-store edits, no mocked Import-Module, disposable VM only.
-    $module=Get-Module Microsoft.WinGet.Client -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
-    $format=Join-Path $module.ModuleBase 'Format.ps1xml'
-    $signature=Get-AuthenticodeSignature -FilePath $format
-    Check ($signature.Status -eq 'Valid' -and $signature.SignerCertificate.Subject -like '*CN=Microsoft Corporation*') 'Genuine Microsoft-signed Format.ps1xml'
-    foreach ($store in @('Cert:\CurrentUser\TrustedPublisher','Cert:\LocalMachine\TrustedPublisher')) {
-        $trusted=Join-Path $store $signature.SignerCertificate.Thumbprint
-        Check (-not (Test-Path -LiteralPath $trusted)) 'Publisher not pre-trusted; certificate store unchanged'
-    }
-    # Reproduce exactly the downloaded Format.ps1xml trust check. AllSigned
-    # additionally challenges unrelated, locally installed modules.
-    Set-Content -LiteralPath $format -Stream Zone.Identifier -Value @('[ZoneTransfer]','ZoneId=3') -Encoding ASCII
-    Check ((Get-Content -LiteralPath $format -Stream Zone.Identifier -Raw) -match 'ZoneId=3') 'Internet-zone marking on the reported format file'
-    Add-Type -Path (Join-Path $PSScriptRoot 'test-publisher-host.cs')
-    $refusalHost=New-Object PublisherRefusalHost($Host)
-    $testShell=[powershell]::Create()
-    $testShell.Runspace=[runspacefactory]::CreateRunspace($refusalHost)
-    # Match Windows PowerShell's normal STA console for Windows Appx/COM.
-    $testShell.Runspace.ApartmentState='STA'
-    $testShell.Runspace.ThreadOptions='ReuseThread'
-    $testShell.Runspace.Open()
-    [void]$testShell.AddScript('Import-Module PackageManagement; Import-Module PowerShellGet')
-    [void]$testShell.Invoke()
-    Check ($testShell.Streams.Error.Count -eq 0) 'Publisher-test prerequisites loaded'
-    $testShell.Commands.Clear()
-    $previousPolicy=Get-ExecutionPolicy -Scope Process
-    Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned -Force
-}
-try {
 for ($pass=1;$pass -le 2;$pass++) {
     Write-Host "STAGE install/update/repair $pass"
-    if ($testShell) {
-        # Only the first PDF line needs a custom host to answer its prompt.
-        # Run native MiKTeX in the normal ConsoleHost, just like the PDF:
-        # a custom runspace redirects native stderr and changes PS5 behavior.
-        $lines=$commands.windows -split "\r?\n",2
-        [void]$testShell.AddScript($lines[0])
-        $testShell.Invoke() | Out-Host
-        if ($testShell.Streams.Error.Count) { throw ($testShell.Streams.Error | Out-String) }
-        $testShell.Commands.Clear()
-        Check ($refusalHost.RefusalUI.Denials -ge $pass) "Actual Format.ps1xml publisher prompt declined, pass $pass"
-        Check ((Get-ExecutionPolicy -Scope Process) -eq 'RemoteSigned') "Security policy unchanged, pass $pass"
-        [void]$testShell.AddScript('(Get-Command Update-TeX).Definition')
-        $definition=$testShell.Invoke()
-        $testShell.Commands.Clear()
-        Check ($definition[0].ToString() -eq (Get-Command Update-TeX).Definition) 'Same published Update-TeX in both hosts'
-        Invoke-Expression $lines[1]
-    } else {
-        Invoke-Expression $commands.windows
-    }
+    Invoke-Expression $commands.windows
+    $version=[version](Get-AppxPackage Microsoft.DesktopAppInstaller).Version
+    Write-Host "WinGet package: $version (baseline: $oldVersion)"
+    if ($oldVersion) { Check ($version -gt $oldVersion) 'Existing older WinGet updated' }
+    Check ((@(Get-Module Microsoft.WinGet.Client -ListAvailable | ForEach-Object Path) -join '|') -eq $modulesBefore) 'No WinGet PowerShell module installed or updated'
+    Check (@(Get-Module Microsoft.WinGet.Client).Count -eq $loadedBefore) 'No WinGet PowerShell module loaded'
+    Check ((Get-ExecutionPolicy -Scope Process) -eq $policyBefore) 'Security policy unchanged'
     Check (Test-Path $editor) "Editor exists, pass $pass"
     Check ((New-Object -ComObject WScript.Shell).CreateShortcut($link).TargetPath -eq $editor) "Start menu repaired, pass $pass"
     & (Join-Path $bin 'miktex.exe') packages check-update
     Check ($LASTEXITCODE -eq 0) "Packages current, pass $pass"
-}
-} finally {
-    if ($testShell) {
-        Set-ExecutionPolicy -Scope Process -ExecutionPolicy $previousPolicy -Force
-        $testShell.Runspace.Dispose(); $testShell.Dispose()
-    }
 }
 $p=Start-Process $editor -PassThru
 try {

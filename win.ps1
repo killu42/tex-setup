@@ -69,6 +69,16 @@ function Install-TeXWinGetRelease {
         $bundle = Join-Path $download 'AppInstaller.msixbundle'
         $archive = Join-Path $download 'Dependencies.zip'
         Invoke-WebRequest -UseBasicParsing -Uri ($release + 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle') -OutFile $bundle -ErrorAction Stop
+        # Read the package version, not the differently numbered WinGet release tag.
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $zip = [IO.Compression.ZipFile]::OpenRead($bundle)
+        try {
+            $reader = [IO.StreamReader]::new($zip.GetEntry('AppxMetadata/AppxBundleManifest.xml').Open())
+            try { $version = [version]([xml]$reader.ReadToEnd()).Bundle.Identity.Version }
+            finally { $reader.Dispose() }
+        } finally { $zip.Dispose() }
+        $installed = Get-AppxPackage Microsoft.DesktopAppInstaller | Sort-Object Version -Descending | Select-Object -First 1
+        if ($installed -and [version]$installed.Version -ge $version -and $installed.Status -eq 'Ok') { return }
         Invoke-WebRequest -UseBasicParsing -Uri ($release + 'DesktopAppInstaller_Dependencies.zip') -OutFile $archive -ErrorAction Stop
         $dependencies = Join-Path $download 'Dependencies'
         Expand-Archive -LiteralPath $archive -DestinationPath $dependencies -ErrorAction Stop
@@ -91,14 +101,13 @@ function Install-TeXWinGetRelease {
     Write-Host 'WinGet wird eingerichtet bzw. aktualisiert ...'
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     try {
+        Install-TeXWinGetRelease
+    } catch {
+        Write-Host 'Direkter Download/Installation fehlgeschlagen; Microsoft-Modul wird als Alternative verwendet ...'
         Install-PackageProvider -Name NuGet -Scope CurrentUser -Force | Out-Null
         Install-Module Microsoft.WinGet.Client -Scope CurrentUser -Repository PSGallery -Force
-        # A declined publisher prompt can already fail here, before Repair runs.
         Import-Module Microsoft.WinGet.Client -Force
         Repair-WinGetPackageManager -Latest -ErrorAction Stop | Out-Null
-    } catch {
-        Write-Host 'WinGet wird ueber das offizielle Microsoft-Installationspaket eingerichtet ...'
-        Install-TeXWinGetRelease
     }
     $cmd = Get-Command winget.exe -ErrorAction SilentlyContinue
     $wg = if ($cmd) { $cmd.Source } else { $null }

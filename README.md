@@ -24,6 +24,11 @@ Der Zusatz verhindert das automatische Entfernen weiterer ungenutzter Pakete.
 
 In Windows PowerShell:
 
+WinGet wird zuerst direkt aus Microsofts signiertem Installationspaket
+eingerichtet/aktualisiert. Nur wenn das scheitert, wird das Microsoft-
+PowerShell-Modul als Alternative verwendet. Aktuelle oder neuere
+App-Installer-Pakete werden nicht zurueckgestuft.
+
 ```powershell
 irm https://raw.githubusercontent.com/killu42/tex-setup/main/win.ps1 | iex
 winget install --id MiKTeX.MiKTeX -e --scope user -s winget --no-upgrade; Update-TeX
